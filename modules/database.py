@@ -12,21 +12,14 @@ from contextlib import contextmanager
 import psycopg2
 import psycopg2.extras
 import streamlit as st
-
+from supabase import create_client
 
 # ── Connection string from Streamlit secrets ──────────────────────────────────
-def _get_dsn() -> str:
-    """
-    Read the Supabase PostgreSQL connection string.
-    Stored in .streamlit/secrets.toml as:
-        [supabase]
-        dsn = "postgresql://postgres:<password>@<host>:5432/postgres"
-    """
-    try:
-        return st.secrets["supabase"]["dsn"]
-    except Exception:
-        return os.environ.get("SUPABASE_DSN", "")
-
+def init_db():
+    # Looks for these keys in the Streamlit Cloud dashboard
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
 
 @contextmanager
 def _conn():

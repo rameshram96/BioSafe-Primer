@@ -6,7 +6,7 @@ Secrets required in .streamlit/secrets.toml:
     [google]
     client_id     = "..."
     client_secret = "..."
-    redirect_uri  = "https://your-app.streamlit.app/"
+    redirect_uri  = "https://biosafe-primer.streamlit.app/"
 """
 
 import os
@@ -39,8 +39,16 @@ def _secret(section: str, key: str, fallback: str = "") -> str:
 
 def _google_client_id()     -> str: return _secret("google", "client_id")
 def _google_client_secret() -> str: return _secret("google", "client_secret")
-def _google_redirect_uri()  -> str: return _secret("google", "redirect_uri",
-                                                     "http://localhost:8501")
+def _google_redirect_uri() -> str:
+    uri = _secret("google", "redirect_uri")
+
+    if not uri:
+        uri = "https://biosafe-primer.streamlit.app/"
+
+    # DEBUG (temporary)
+    st.write("DEBUG redirect_uri:", uri)
+
+    return uri
 
 
 # ── Password helpers ──────────────────────────────────────────────────────────
@@ -93,13 +101,18 @@ def handle_google_callback(code: str) -> dict | None:
     try:
         # Step 1 — exchange code for token
         token_resp = http.post(_GOOGLE_TOKEN_URL, data={
-            "code":          code,
-            "client_id":     _google_client_id(),
-            "client_secret": _google_client_secret(),
-            "redirect_uri":  _google_redirect_uri(),
-            "grant_type":    "authorization_code",
-        }, timeout=10)
-        token_resp.raise_for_status()
+    "code":          code,
+    "client_id":     _google_client_id(),
+    "client_secret": _google_client_secret(),
+    "redirect_uri":  _google_redirect_uri(),
+    "grant_type":    "authorization_code",
+}, timeout=10)
+
+# DEBUG
+st.write("Token response status:", token_resp.status_code)
+st.write("Token response body:", token_resp.text)
+
+token_resp.raise_for_status()
         access_token = token_resp.json().get("access_token")
         if not access_token:
             return None

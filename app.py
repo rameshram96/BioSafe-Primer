@@ -1,7 +1,7 @@
 import streamlit as st
 import os, sys, json
 import pandas as pd
-
+import streamlit as st
 sys.path.insert(0, os.path.dirname(__file__))
 
 from modules.database import (
@@ -33,6 +33,12 @@ MAP_DIR  = os.path.join(BASE_DIR, 'exports')
 os.makedirs(MAP_DIR, exist_ok=True)
 
 init_db()
+try:
+    dsn = st.secrets["supabase"]["dsn"]
+    gid = st.secrets["google"]["client_id"]
+    st.success(f"✅ Secrets loaded — Supabase: {'✔' if dsn else '✗'}  Google: {'✔' if gid else '✗'}")
+except Exception as e:
+    st.error(f"❌ Secrets missing: {e}")
 
 st.set_page_config(
     page_title="BioSafe Primer",
@@ -426,20 +432,34 @@ def _render_register_tab():
 def render_auth_page():
     # ── Handle Google OAuth callback ──────────────────────────────────────────
     params = st.query_params
-    if "code" in params:
-        with st.spinner("Completing Google Sign-In…"):
-            userinfo = handle_google_callback(params["code"])
-        st.query_params.clear()
-        if userinfo and userinfo.get("email"):
-            user = login_with_google(userinfo)
-            if user:
-                set_session_user(user)
-                st.rerun()
-            else:
-                st.error("Could not retrieve your account. Please try again.")
+
+# DEBUG
+st.write("Query params:", params)
+
+if "code" in params:
+    code = params.get("code")
+
+    # FIX: Streamlit returns list sometimes
+    if isinstance(code, list):
+        code = code[0]
+
+    with st.spinner("Completing Google Sign-In…"):
+        userinfo = handle_google_callback(code)
+
+    st.query_params.clear()
+
+    if userinfo and userinfo.get("email"):
+        user = login_with_google(userinfo)
+        if user:
+            set_session_user(user)
+            st.success("Login successful")
+            st.rerun()
         else:
-            st.error("Google Sign-In failed. Please try again or use email/password.")
-        return
+            st.error("User creation/login failed")
+    else:
+        st.error("Google Sign-In failed — no user info returned")
+
+    return
 
     # ── Layout: narrow centred column ─────────────────────────────────────────
     _, col, _ = st.columns([1, 2.2, 1])
