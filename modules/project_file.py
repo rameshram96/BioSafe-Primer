@@ -1,27 +1,18 @@
 """
 project_file.py — BioSafe Primer (.bsp) file handler.
-
-A .bsp file is a JSON file containing the complete project state:
-  - project metadata
-  - vector sequence and features
-  - all primers (all versions)
-  - PCR run log
-  - redesign history
-  - gel images (base64 encoded)
-
-No database required. One file per project.
+Everything in memory. No disk writes ever.
+Gel images stored as base64 inside project dict.
+Excel/PDF generated into BytesIO buffers.
 """
-import json
-import base64
-import os
+import json, base64, copy
 from datetime import datetime
+from io import BytesIO
+from collections import defaultdict
 
 BSP_VERSION = "1.0"
 
 
-def new_project(name, vector_name, vector_length,
-                vector_sequence, vector_features):
-    """Create a fresh project state dict."""
+def new_project(name, vector_name, vector_length, vector_sequence, vector_features):
     return {
         "bsp_version":      BSP_VERSION,
         "project_name":     name,
@@ -38,71 +29,40 @@ def new_project(name, vector_name, vector_length,
 
 
 def save_project_bytes(state):
-    """
-    Serialise project state to JSON bytes for download.
-    Gel image paths on disk are read and stored as base64.
-    Returns bytes.
-    """
-    export_state = json.loads(json.dumps(state))   # deep copy
-
-    for run in export_state.get("pcr_runs", []):
-        path = run.get("gel_image_path")
-        if path and os.path.exists(path):
-            with open(path, "rb") as f:
-                run["gel_image_b64"] = base64.b64encode(f.read()).decode()
-            run["gel_image_path"] = os.path.basename(path)
-        else:
-            run["gel_image_b64"] = None
-
-    export_state["last_saved"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-    return json.dumps(export_state, indent=2, ensure_ascii=False).encode("utf-8")
+    s = copy.deepcopy(state)
+    s["last_saved"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    return json.dumps(s, indent=2, ensure_ascii=False).encode("utf-8")
 
 
-def load_project_bytes(file_bytes, gel_dir):
-    """
-    Load project state from .bsp file bytes.
-    Extracts base64 gel images to gel_dir on disk.
-    Returns state dict.
-    """
+def load_project_bytes(file_bytes):
     state = json.loads(file_bytes.decode("utf-8"))
-
-    # Validate
     if "project_name" not in state:
         raise ValueError("Not a valid BioSafe Primer (.bsp) file.")
-
-    os.makedirs(gel_dir, exist_ok=True)
-
-    for run in state.get("pcr_runs", []):
-        b64 = run.pop("gel_image_b64", None)
-        fname = run.get("gel_image_path")
-        if b64 and fname:
-            full_path = os.path.join(gel_dir, os.path.basename(fname))
-            with open(full_path, "wb") as f:
-                f.write(base64.b64decode(b64))
-            run["gel_image_path"] = full_path
-
     return state
 
 
-# ── Primer helpers ────────────────────────────────────────────────────────────
+def encode_gel_image(file_bytes):
+    return base64.b64encode(file_bytes).decode("utf-8")
+
+
+def decode_gel_image(b64_string):
+    return base64.b64decode(b64_string) if b64_string else None
+
 
 def get_best_primers(state):
-    """Return latest version per amplicon from state."""
     seen = {}
     for p in state.get("primers", []):
         an = p["amplicon_num"]
-        if an not in seen or p.get("version", 1) > seen[an].get("version", 1):
+        if an not in seen or p.get("version",1) > seen[an].get("version",1):
             seen[an] = p
     return sorted(seen.values(), key=lambda x: x["amplicon_num"])
 
 
 def add_primers(state, primers):
-    """Append newly designed primers to state."""
     state["primers"].extend(primers)
 
 
 def update_primer_status(state, primer_id, new_status):
-    """Update status of a primer by its id (index-based)."""
     for p in state["primers"]:
         if p.get("_id") == primer_id:
             p["status"] = new_status
@@ -110,7 +70,6 @@ def update_primer_status(state, primer_id, new_status):
 
 
 def update_amplicon_name(state, primer_id, new_name):
-    """Rename an amplicon across all its versions."""
     amp_num = None
     for p in state["primers"]:
         if p.get("_id") == primer_id:
@@ -122,28 +81,25 @@ def update_amplicon_name(state, primer_id, new_name):
                 p["amplicon_name"] = new_name
 
 
-def add_pcr_run(state, primer_id, result, gel_path, lane_number, notes,
-                amplicon_num, fp_sequence, rp_sequence):
-    """Log a PCR run."""
+def add_pcr_run(state, primer_id, result, gel_b64, lane_number,
+                notes, amplicon_num, fp_sequence, rp_sequence):
     state["pcr_runs"].append({
-        "id":             len(state["pcr_runs"]) + 1,
-        "primer_id":      primer_id,
-        "amplicon_num":   amplicon_num,
-        "fp_sequence":    fp_sequence,
-        "rp_sequence":    rp_sequence,
-        "result":         result,
-        "gel_image_path": gel_path,
-        "lane_number":    lane_number,
-        "notes":          notes,
-        "run_date":       datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "id":            len(state["pcr_runs"]) + 1,
+        "primer_id":     primer_id,
+        "amplicon_num":  amplicon_num,
+        "fp_sequence":   fp_sequence,
+        "rp_sequence":   rp_sequence,
+        "result":        result,
+        "gel_image_b64": gel_b64,
+        "lane_number":   lane_number,
+        "notes":         notes,
+        "run_date":      datetime.now().strftime("%Y-%m-%d %H:%M"),
     })
 
 
 def add_redesign_history(state, amplicon_num, old_primer_id,
-                          ext_left, ext_right, reason,
-                          failure_type, attempt_num,
-                          upstream_overlap, downstream_overlap):
-    """Record a redesign event."""
+                          ext_left, ext_right, reason, failure_type,
+                          attempt_num, upstream_overlap, downstream_overlap):
     state["redesign_history"].append({
         "amplicon_num":               amplicon_num,
         "old_primer_id":              old_primer_id,
@@ -159,15 +115,228 @@ def add_redesign_history(state, amplicon_num, old_primer_id,
 
 
 def assign_ids(primers):
-    """Assign unique _id to each primer dict (index-based)."""
     for i, p in enumerate(primers):
         p["_id"] = i
     return primers
 
 
 def get_project_stats(state):
-    """Return done/total counts."""
     best  = get_best_primers(state)
     total = len(best)
     done  = sum(1 for p in best if p.get("status") == "Done")
     return {"total": total, "done": done}
+
+
+def primers_to_excel_bytes(primers, project_name):
+    import openpyxl
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    STATUS_COLORS = {
+        'Pending':'FFF9C4','Done':'C8E6C9','Failed':'FFCDD2',
+        'Overlap Violation':'E1BEE7','Design Failed':'F8BBD9','Redesigned':'B3E5FC',
+    }
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Primers"
+
+    total_cols = 22
+    ws.merge_cells(f'A1:{get_column_letter(total_cols)}1')
+    tc = ws['A1']
+    tc.value = f"Overlapping PCR Primer Design — {project_name}"
+    tc.font  = Font(bold=True, size=13, color='FFFFFF')
+    tc.fill  = PatternFill('solid', fgColor='1A237E')
+    tc.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[1].height = 28
+
+    headers = [
+        'Amp #','Amplicon Name','Ver','Status',
+        "FP Sequence (5'→3')",'FP\nLen','FP\nTm(°C)','FP\nGC%',
+        'FP Hairpin\nTm(°C)',"FP 3'Stab\n(ΔG)",'FP\nPenalty',
+        "RP Sequence (5'→3')",'RP\nLen','RP\nTm(°C)','RP\nGC%',
+        'RP Hairpin\nTm(°C)',"RP 3'Stab\n(ΔG)",'RP\nPenalty',
+        'Pair\nPenalty','Amp\nLen(bp)','Overlap\nUpstream(bp)','Overlap\nDownstream(bp)'
+    ]
+    hfill  = PatternFill('solid', fgColor='283593')
+    hfont  = Font(bold=True, color='FFFFFF', size=9)
+    border = Border(
+        left=Side(style='thin',color='9FA8DA'), right=Side(style='thin',color='9FA8DA'),
+        top=Side(style='thin',color='9FA8DA'), bottom=Side(style='thin',color='9FA8DA')
+    )
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=2, column=col, value=h)
+        cell.fill=hfill; cell.font=hfont; cell.border=border
+        cell.alignment=Alignment(horizontal='center',wrap_text=True)
+    ws.row_dimensions[2].height = 38
+
+    for ri, p in enumerate(primers, 3):
+        status = p.get('status','Pending')
+        rfill  = PatternFill('solid',fgColor=STATUS_COLORS.get(status,'FFFFFF'))
+        row = [
+            p['amplicon_num'],
+            p.get('amplicon_name', f"Amplicon_{p['amplicon_num']}"),
+            p.get('version',1), status,
+            p['fp_sequence'],p['fp_length'],p['fp_tm'],p['fp_gc'],
+            p.get('fp_hairpin_tm',0),p.get('fp_end_stability',0),p.get('fp_penalty',0),
+            p['rp_sequence'],p['rp_length'],p['rp_tm'],p['rp_gc'],
+            p.get('rp_hairpin_tm',0),p.get('rp_end_stability',0),p.get('rp_penalty',0),
+            p.get('pair_penalty',0),p['amplicon_length'],
+            p.get('overlap_prev') if p.get('overlap_prev') is not None else 'N/A',
+            p.get('overlap_next') if p.get('overlap_next') is not None else 'N/A',
+        ]
+        for ci, val in enumerate(row, 1):
+            cell = ws.cell(row=ri, column=ci, value=val)
+            cell.fill=rfill; cell.border=border
+            cell.alignment=Alignment(horizontal='center',wrap_text=True)
+            if ci in [5,12]:
+                cell.font=Font(name='Courier New',size=8)
+                cell.alignment=Alignment(horizontal='left')
+
+    col_widths=[7,18,5,12,36,7,8,7,10,10,9,36,7,8,7,10,10,9,9,9,12,13]
+    for i,w in enumerate(col_widths,1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes='A3'
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+def primers_to_pdf_bytes(project_name, primers, pcr_runs):
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+    from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
+                                     Paragraph, Spacer, Image as RLImage, PageBreak)
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER
+
+    buf  = BytesIO()
+    doc  = SimpleDocTemplate(buf, pagesize=landscape(A4),
+                              leftMargin=1.5*cm, rightMargin=1.5*cm,
+                              topMargin=1.5*cm, bottomMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+    title_s = ParagraphStyle('t',parent=styles['Title'],fontSize=15,
+                              textColor=colors.HexColor('#1A237E'),spaceAfter=6)
+    sec_s   = ParagraphStyle('s',parent=styles['Heading2'],fontSize=11,
+                              textColor=colors.HexColor('#283593'),spaceAfter=5)
+    body_s  = ParagraphStyle('b',parent=styles['Normal'],fontSize=8,spaceAfter=3)
+    story   = []
+
+    story.append(Paragraph(f"Overlapping PCR Primer Report: {project_name}", title_s))
+    story.append(Paragraph(
+        "BioSafe Primer | Division of Plant Physiology, ICAR-IARI", body_s))
+    story.append(Spacer(1,0.3*cm))
+    story.append(PageBreak())
+
+    story.append(Paragraph("Primer Design Summary", sec_s))
+    thead = [['Amp#','Name','Ver','Status',
+              'Forward Primer','FP\nLen','FP\nTm','FP\nGC%',
+              'FP\nHairpin',"FP\n3'Stab",'FP\nPenalty',
+              'Reverse Primer','RP\nLen','RP\nTm','RP\nGC%',
+              'RP\nHairpin',"RP\n3'Stab",'RP\nPenalty',
+              'Pair\nPenalty','Amp\nLen','Overlap\nUp','Overlap\nDown']]
+    for p in primers:
+        prev_ov = p.get('overlap_prev')
+        next_ov = p.get('overlap_next')
+        thead.append([
+            str(p['amplicon_num']),
+            p.get('amplicon_name',f"Amplicon_{p['amplicon_num']}"),
+            str(p.get('version',1)), p.get('status','Pending'),
+            p['fp_sequence'],str(p['fp_length']),f"{p['fp_tm']}°C",f"{p['fp_gc']}%",
+            f"{p.get('fp_hairpin_tm',0)}°C",f"{p.get('fp_end_stability',0)}",
+            str(p.get('fp_penalty',0)),
+            p['rp_sequence'],str(p['rp_length']),f"{p['rp_tm']}°C",f"{p['rp_gc']}%",
+            f"{p.get('rp_hairpin_tm',0)}°C",f"{p.get('rp_end_stability',0)}",
+            str(p.get('rp_penalty',0)),str(p.get('pair_penalty',0)),
+            str(p['amplicon_length']),
+            str(prev_ov) if prev_ov is not None else 'N/A',
+            str(next_ov) if next_ov is not None else 'N/A',
+        ])
+    t = Table(thead, repeatRows=1)
+    t.setStyle(TableStyle([
+        ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#1A237E')),
+        ('TEXTCOLOR',(0,0),(-1,0),colors.white),
+        ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),
+        ('FONTSIZE',(0,0),(-1,-1),5.5),
+        ('ALIGN',(0,0),(-1,-1),'CENTER'),
+        ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+        ('ROWBACKGROUNDS',(0,1),(-1,-1),
+         [colors.HexColor('#F5F5FF'),colors.HexColor('#E8EAF6')]),
+        ('GRID',(0,0),(-1,-1),0.4,colors.HexColor('#9FA8DA')),
+        ('FONTNAME',(4,1),(4,-1),'Courier'),
+        ('FONTNAME',(11,1),(11,-1),'Courier'),
+    ]))
+    story.append(t)
+
+    if pcr_runs:
+        story.append(PageBreak())
+        story.append(Paragraph("PCR Run Log", sec_s))
+        rhead = [['Run Date','Amplicon #','Result','Lane','Notes']]
+        for r in pcr_runs:
+            rhead.append([r.get('run_date',''),str(r.get('amplicon_num','')),
+                          r.get('result',''),str(r.get('lane_number','')),r.get('notes','')])
+        rt = Table(rhead, repeatRows=1)
+        rt.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#283593')),
+            ('TEXTCOLOR',(0,0),(-1,0),colors.white),
+            ('FONTSIZE',(0,0),(-1,-1),7),
+            ('ALIGN',(0,0),(-1,-1),'CENTER'),
+            ('GRID',(0,0),(-1,-1),0.4,colors.HexColor('#9FA8DA')),
+            ('ROWBACKGROUNDS',(0,1),(-1,-1),
+             [colors.HexColor('#FFF9C4'),colors.white]),
+        ]))
+        story.append(rt)
+
+        runs_with_gel = [r for r in pcr_runs if r.get('gel_image_b64')]
+        if runs_with_gel:
+            story.append(PageBreak())
+            story.append(Paragraph("Gel Images", sec_s))
+            amp_gels = defaultdict(list)
+            for r in runs_with_gel:
+                amp_gels[r.get('amplicon_num','?')].append(r)
+            for amp_num in sorted(amp_gels.keys()):
+                story.append(Paragraph(f"Amplicon {amp_num}", sec_s))
+                gel_row = []
+                for r in amp_gels[amp_num]:
+                    img_bytes = decode_gel_image(r['gel_image_b64'])
+                    img_buf   = BytesIO(img_bytes)
+                    rl        = '✅ Pass' if r.get('result')=='Pass' else '❌ Fail'
+                    rc        = (colors.HexColor('#1b5e20')
+                                 if r.get('result')=='Pass'
+                                 else colors.HexColor('#b71c1c'))
+                    try:
+                        img_el = RLImage(img_buf, width=7*cm, height=5*cm)
+                    except Exception:
+                        continue  # skip invalid/corrupt image
+                    cap       = Paragraph(
+                        f"<b>{rl}</b> Lane {r.get('lane_number','')} {r.get('run_date','')}",
+                        ParagraphStyle('gc',parent=body_s,fontSize=7,
+                                       textColor=rc,alignment=TA_CENTER))
+                    gel_row.append([img_el, cap])
+                    if len(gel_row) == 3:
+                        tbl = Table([[item for pair in gel_row for item in pair]],
+                                    colWidths=[7*cm,3.5*cm]*3)
+                        tbl.setStyle(TableStyle([
+                            ('VALIGN',(0,0),(-1,-1),'TOP'),
+                            ('ALIGN',(0,0),(-1,-1),'CENTER'),
+                            ('GRID',(0,0),(-1,-1),0.3,colors.HexColor('#9FA8DA')),
+                        ]))
+                        story.append(tbl)
+                        story.append(Spacer(1,0.2*cm))
+                        gel_row = []
+                if gel_row:
+                    tbl = Table([[item for pair in gel_row for item in pair]],
+                                colWidths=[7*cm,3.5*cm]*len(gel_row))
+                    tbl.setStyle(TableStyle([
+                        ('VALIGN',(0,0),(-1,-1),'TOP'),
+                        ('ALIGN',(0,0),(-1,-1),'CENTER'),
+                        ('GRID',(0,0),(-1,-1),0.3,colors.HexColor('#9FA8DA')),
+                    ]))
+                    story.append(tbl)
+                    story.append(Spacer(1,0.3*cm))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf
