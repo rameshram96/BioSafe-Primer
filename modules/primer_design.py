@@ -440,7 +440,7 @@ def redesign_primers(sequence, seg_start, seg_end, amplicon_num,
     # Segment can be larger than 500bp — Primer3 still returns amplicons ≤500bp
     # Only split if Primer3 genuinely cannot find any valid pair in this region
     if False:  # placeholder — split logic moved below after single attempt
-    
+        pass
     # ── Single amplicon redesign ──────────────────────────────────────────────
     # Segment may exceed 500bp — that is fine, Primer3 returns amplicons ≤500bp
     r, offset = _design_segment(sequence, actual_start, actual_end, params)
