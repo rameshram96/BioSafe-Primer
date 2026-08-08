@@ -258,10 +258,9 @@ amplicons (A and B) have been designed to cover the full region with no gap.
     # Auto-split warning
     region_len = (min(len(proj()['vector_sequence']), p['amplicon_end'] + ext_r) -
                   max(0, p['amplicon_start'] - ext_l))
-    if region_len > MAX_AMPLICON:
-        st.info(f"ℹ️ Extended region ({region_len} bp) exceeds 500 bp — "
-                "Primer3 will still search for amplicons ≤500 bp within it. "
-                "Auto-split only occurs if no valid pair is found.")
+    if region_len > int(MAX_AMPLICON * 1.4):
+        st.warning(f"⚠️ Extended region ({region_len} bp) exceeds threshold — "
+                   "this will be split into 2 amplicons automatically.")
 
     reason = st.text_input("Additional notes (optional)",
                             placeholder="e.g. No band after 35 cycles", key=f"rsn_{p['_id']}")

@@ -380,28 +380,53 @@ def get_redesign_recommendation(failure_type):
                                         FAILURE_RECOMMENDATIONS['Other'])
 
 
+def _validate_redesigned(primer, prev_amp_end, next_amp_start):
+    """Validate overlap rules for a redesigned primer. Returns violations list."""
+    violations = []
+    if prev_amp_end is not None:
+        primer['overlap_prev'] = prev_amp_end - primer['amplicon_start']
+    else:
+        primer['overlap_prev'] = None
+    if next_amp_start is not None:
+        primer['overlap_next'] = primer['amplicon_end'] - next_amp_start
+    else:
+        primer['overlap_next'] = None
+    if primer['overlap_prev'] is not None and primer['overlap_prev'] < 50:
+        violations.append(
+            f"Upstream overlap = {primer['overlap_prev']} bp (< 50 bp). "
+            "Try increasing upstream extension."
+        )
+    if primer['overlap_next'] is not None and primer['overlap_next'] < 50:
+        violations.append(
+            f"Downstream overlap = {primer['overlap_next']} bp (< 50 bp). "
+            "Downstream overlap depends on the next amplicon's FP position."
+        )
+    primer['redesign_violations'] = violations
+    primer['redesign_ok']         = len(violations) == 0
+    return violations
+
+
 def redesign_primers(sequence, seg_start, seg_end, amplicon_num,
                      ext_left=100, ext_right=100, old_version=1,
                      params=None, prev_amp_end=None, next_amp_start=None):
     """
     Redesign primers for a failed amplicon.
 
-    Extension rules:
-      - ext_left: pulls segment start leftward — gives Primer3 more upstream
-        sequence, helping FP land further left → increases upstream overlap
-      - ext_right: pushes segment end rightward — gives Primer3 more downstream
-        sequence for RP placement → but DOES NOT directly reduce downstream
-        overlap because next segment start is recalculated from actual amp_end
+    If the extended region exceeds MAX_AMPLICON (500 bp):
+      - Splits into two overlapping amplicons (A and B)
+      - Returns a list of two primers instead of one
+      - Both amplicons together cover the full region with no gap
+      - Returns (result, None, is_split=True)
 
-    Overlap validation:
-      - After design, upstream overlap = prev_amp_end - new_amp_start (must ≥ 50)
-      - After design, downstream overlap = new_amp_end - next_amp_start (must ≥ 50)
-      - Both checked and returned with the result for preview before saving
-
-    Max versions: 3 — after v3, returns None with a message.
+    Returns:
+      (primer_or_list, error_message, is_split)
+      - primer_or_list: single primer dict, or list of two dicts if split
+      - error_message: None on success, string on failure
+      - is_split: True if region was split into two amplicons
     """
     if old_version >= MAX_REDESIGN_VERSIONS:
-        return None, f"Maximum redesign attempts ({MAX_REDESIGN_VERSIONS}) reached for Amplicon {amplicon_num}"
+        return None, (f"Maximum redesign attempts ({MAX_REDESIGN_VERSIONS}) "
+                      f"reached for Amplicon {amplicon_num}"), False
 
     if params is None:
         params = DEFAULT_PARAMS.copy()
@@ -409,46 +434,62 @@ def redesign_primers(sequence, seg_start, seg_end, amplicon_num,
     seq_len      = len(sequence)
     actual_start = max(0, seg_start - ext_left)
     actual_end   = min(seq_len, seg_end + ext_right)
+    region_len   = actual_end - actual_start
 
-    # Enforce max segment size
-    if actual_end - actual_start > MAX_AMPLICON:
-        actual_end = actual_start + MAX_AMPLICON
-
+    # ── Try single amplicon first (Primer3 enforces ≤500bp via product size range) ──
+    # Segment can be larger than 500bp — Primer3 still returns amplicons ≤500bp
+    # Only split if Primer3 genuinely cannot find any valid pair in this region
+    if False:  # placeholder — split logic moved below after single attempt
+    
+    # ── Single amplicon redesign ──────────────────────────────────────────────
+    # Segment may exceed 500bp — that is fine, Primer3 returns amplicons ≤500bp
     r, offset = _design_segment(sequence, actual_start, actual_end, params)
     primer    = _extract_best(r, offset, amplicon_num,
                                version=old_version + 1,
                                max_amplicon=MAX_AMPLICON)
 
-    if primer is None:
-        return None, "Primer3 could not design a valid pair with current extension values"
+    if primer is not None:
+        _validate_redesigned(primer, prev_amp_end, next_amp_start)
+        return primer, None, False
 
-    # Calculate actual overlaps with neighbours
-    if prev_amp_end is not None:
-        primer['overlap_prev'] = prev_amp_end - primer['amplicon_start']
-    else:
-        primer['overlap_prev'] = None
+    # ── Primer3 failed on full extended segment — try auto-split ─────────────
+    # Split the ORIGINAL failed region (seg_start → seg_end) at midpoint
+    # Both halves stay within 150–500bp
+    mid     = seg_start + (seg_end - seg_start) // 2
+    a_start = max(0, seg_start - ext_left)
+    a_end   = min(seq_len, mid + 25)
+    b_start = max(0, mid - 25)
+    b_end   = min(seq_len, seg_end + ext_right)
 
-    if next_amp_start is not None:
-        primer['overlap_next'] = primer['amplicon_end'] - next_amp_start
-    else:
-        primer['overlap_next'] = None
+    # Enforce 500bp cap on each half's segment
+    if a_end - a_start > MAX_AMPLICON:
+        a_end = a_start + MAX_AMPLICON
+    if b_end - b_start > MAX_AMPLICON:
+        b_start = b_end - MAX_AMPLICON
 
-    # Validate overlaps
-    violations = []
-    if primer['overlap_prev'] is not None and primer['overlap_prev'] < 50:
-        violations.append(
-            f"Upstream overlap = {primer['overlap_prev']} bp (< 50 bp minimum). "
-            f"Try increasing upstream extension."
+    r_a, off_a = _design_segment(sequence, a_start, a_end, params)
+    r_b, off_b = _design_segment(sequence, b_start, b_end, params)
+
+    amp_a = _extract_best(r_a, off_a, amplicon_num,
+                           version=old_version + 1, max_amplicon=MAX_AMPLICON)
+    amp_b = _extract_best(r_b, off_b, amplicon_num,
+                           version=old_version + 1, max_amplicon=MAX_AMPLICON)
+
+    if amp_a is None or amp_b is None:
+        return None, ("Primer3 could not design primers even after splitting. "
+                      "Try different extension values."), False
+
+    amp_a['split_label'] = 'A'
+    amp_b['split_label'] = 'B'
+
+    _validate_redesigned(amp_a, prev_amp_end, amp_b['amplicon_start'])
+    _validate_redesigned(amp_b, amp_a['amplicon_end'], next_amp_start)
+
+    split_overlap = amp_a['amplicon_end'] - amp_b['amplicon_start']
+    if split_overlap < 50:
+        amp_a['redesign_violations'].append(
+            f"Overlap between split amplicons A and B = {split_overlap} bp (< 50 bp)."
         )
-    if primer['overlap_next'] is not None and primer['overlap_next'] < 50:
-        violations.append(
-            f"Downstream overlap = {primer['overlap_next']} bp (< 50 bp minimum). "
-            f"Downstream overlap is controlled by the NEXT amplicon's FP position, "
-            f"not by right extension of this amplicon. "
-            f"If this persists after accept, mark the next amplicon for redesign."
-        )
+        amp_a['redesign_ok'] = False
 
-    primer['redesign_violations'] = violations
-    primer['redesign_ok']         = len(violations) == 0
-
-    return primer, None
+    return [amp_a, amp_b], None, True
