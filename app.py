@@ -4,7 +4,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from modules.sequence_parser import parse_sequence, detect_format
+from modules.sequence_parser import parse_sequence, detect_format, parse_pasted_sequence
 from modules.primer_design   import (design_all_primers, redesign_primers,
                                       get_redesign_recommendation,
                                       MIN_AMPLICON, MAX_AMPLICON,
@@ -16,6 +16,8 @@ from modules.project_file    import (new_project, save_project_bytes,
                                       encode_gel_image, decode_gel_image,
                                       primers_to_excel_bytes,
                                       primers_to_pdf_bytes,
+                                      primers_to_summary_excel_bytes,
+                                      primers_to_order_csv_bytes,
                                       get_best_primers, add_primers,
                                       update_primer_status,
                                       update_amplicon_name, add_pcr_run,
@@ -53,6 +55,8 @@ html,body,[class*="css"]{font-family:'Source Sans 3','Segoe UI',Arial,sans-serif
   font-size:1.1rem;font-weight:600;margin:20px 0 12px;}
 .upload-done{background:#E8F5E9;border:1.5px solid #009E73;border-radius:8px;
   padding:12px 16px;color:#1B4332;font-size:13px;margin-bottom:10px;}
+.circ-note{background:#E3F2FD;border:1.5px solid #0072B2;border-radius:8px;
+  padding:10px 16px;color:#0D47A1;font-size:12.5px;margin-bottom:10px;}
 .param-confirm{background:#FFF;border:2px solid #0072B2;border-radius:10px;
   padding:16px 20px;margin:12px 0;}
 .param-confirm h4{color:#0072B2;margin:0 0 10px;font-size:1rem;font-weight:700;}
@@ -69,6 +73,8 @@ html,body,[class*="css"]{font-family:'Source Sans 3','Segoe UI',Arial,sans-serif
 .ov-ok{background:#D4EDDA;color:#155724;border:1px solid #009E73;}
 .ov-fail{background:#FDECEA;color:#721C24;border:1px solid #D55E00;}
 .ov-na{background:#EEF2F7;color:#5A6475;border:1px solid #C3CFE0;}
+.circ-badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600;
+  background:#E1F5FE;color:#01579B;border:1px solid #0288D1;}
 .status-badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;color:white;}
 .redesign-preview{background:#FFF8EC;border:2px solid #E69F00;border-radius:10px;padding:16px 20px;margin-top:12px;}
 .redesign-preview h4{color:#7A4F00;margin:0 0 10px;font-size:1rem;font-weight:700;}
@@ -120,6 +126,12 @@ def _param_confirm_panel(max_amp, min_over, opt_tm, min_tm, max_tm):
   <h4>⚙️ Confirm Design Parameters Before Running</h4>
 </div>""", unsafe_allow_html=True)
 
+    st.markdown(
+        '<div class="circ-note">🔁 <strong>Circular plasmid mode:</strong> the vector is '
+        'treated as circular — the last amplicon will be designed to read through the '
+        'origin and overlap Amplicon 1 by the minimum overlap set below.</div>',
+        unsafe_allow_html=True)
+
     c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown("**Amplicon**")
@@ -150,6 +162,11 @@ def _redesign_ui(p):
     st.markdown("---")
     st.markdown("**🔄 Redesign Primers**")
     pk = f"rdp_{p['_id']}"
+
+    if p.get('wraps_origin'):
+        st.info("🔁 This is the final, origin-spanning amplicon of the circular vector. "
+                "After redesigning, please confirm it still overlaps Amplicon 1 across "
+                "the origin by at least the minimum overlap.")
 
     if pk in st.session_state:
         rd      = st.session_state[pk]
@@ -229,6 +246,9 @@ amplicons (A and B) have been designed to cover the full region with no gap.
                 results[0].get('overlap_prev'), results[-1].get('overlap_next'))
             del st.session_state[pk]
             st.success(f"✅ {'2 split amplicons' if is_split else 'New primers'} saved! Remember to 💾 Save Project.")
+            if p.get('wraps_origin'):
+                st.warning("🔁 Reminder: verify the redesigned amplicon still overlaps "
+                           "Amplicon 1 across the plasmid origin (Rule 5).")
             st.rerun()
         if cb.button("❌ Reject & Try Again", key=f"rej_{p['_id']}"):
             del st.session_state[pk]; st.rerun()
@@ -313,32 +333,64 @@ if 'project' not in st.session_state:
 
     # Create New Project
     st.markdown('<div class="home-box"><h3>🆕 Create New Project</h3>', unsafe_allow_html=True)
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        new_name = st.text_input("Project name", placeholder="e.g. pCAMBIA1300_GFP",
-                                  key="new_name")
-    with c2:
+    new_name = st.text_input("Project name", placeholder="e.g. pCAMBIA1300_GFP", key="new_name")
+
+    input_mode = st.radio(
+        "Sequence input method",
+        ["📁 Upload file", "📋 Paste sequence"],
+        horizontal=True, key="input_mode"
+    )
+
+    si = None
+    parse_error = None
+
+    if input_mode == "📁 Upload file":
         new_file = st.file_uploader("Upload vector sequence (FASTA or GenBank)",
                                      type=['fa','fasta','fna','gb','gbk','genbank'], key="new_file")
-    if new_file and new_name:
-        try:
-            content = new_file.read().decode('utf-8', errors='ignore')
-            fmt = detect_format(new_file.name)
-            si  = parse_sequence(content, fmt)
-            mc1,mc2,mc3 = st.columns(3)
-            mc1.markdown(f'<div class="metric-card"><div class="value">{si["length"]:,}</div><div class="label">Vector Length (bp)</div></div>', unsafe_allow_html=True)
-            mc2.markdown(f'<div class="metric-card"><div class="value">{len(si["features"])}</div><div class="label">Features</div></div>', unsafe_allow_html=True)
-            mc3.markdown(f'<div class="metric-card"><div class="value">{fmt.upper()}</div><div class="label">Format</div></div>', unsafe_allow_html=True)
-            st.success(f"✅ Parsed: **{si['name']}** — {si['length']:,} bp")
-            if st.button("🚀 Create Project", type="primary"):
-                p = new_project(new_name, si['name'], si['length'], si['sequence'], si.get('features',[]))
-                st.session_state['project']  = p
-                st.session_state['seq_info'] = si
-                st.rerun()
-        except Exception as e:
-            st.error(f"Parse error: {e}")
-    elif new_file and not new_name:
-        st.warning("⚠️ Please enter a project name before creating.")
+        if new_file and new_name:
+            try:
+                content = new_file.read().decode('utf-8', errors='ignore')
+                fmt = detect_format(new_file.name)
+                si  = parse_sequence(content, fmt)
+            except Exception as e:
+                parse_error = str(e)
+        elif new_file and not new_name:
+            st.warning("⚠️ Please enter a project name before creating.")
+    else:
+        pasted = st.text_area(
+            "Paste FASTA, GenBank, or raw sequence text",
+            height=180,
+            placeholder=(">MyPlasmid\nATGCGTACGT...\n\n"
+                         "— or paste full GenBank text (starting with 'LOCUS') —\n\n"
+                         "— or just paste the raw sequence letters —"),
+            key="pasted_seq"
+        )
+        if pasted.strip() and new_name:
+            try:
+                si = parse_pasted_sequence(pasted, new_name)
+            except Exception as e:
+                parse_error = str(e)
+        elif pasted.strip() and not new_name:
+            st.warning("⚠️ Please enter a project name before creating.")
+
+    if parse_error:
+        st.error(f"Parse error: {parse_error}")
+
+    if si:
+        st.markdown(
+            '<div class="circ-note">🔁 This vector will be treated as a <strong>circular '
+            'plasmid</strong> — the design step will make the last amplicon overlap '
+            'Amplicon 1 across the origin.</div>', unsafe_allow_html=True)
+        mc1,mc2,mc3 = st.columns(3)
+        mc1.markdown(f'<div class="metric-card"><div class="value">{si["length"]:,}</div><div class="label">Vector Length (bp)</div></div>', unsafe_allow_html=True)
+        mc2.markdown(f'<div class="metric-card"><div class="value">{len(si["features"])}</div><div class="label">Features</div></div>', unsafe_allow_html=True)
+        mc3.markdown(f'<div class="metric-card"><div class="value">{"Pasted" if input_mode=="📋 Paste sequence" else "File"}</div><div class="label">Source</div></div>', unsafe_allow_html=True)
+        st.success(f"✅ Parsed: **{si['name']}** — {si['length']:,} bp")
+        if st.button("🚀 Create Project", type="primary"):
+            p = new_project(new_name, si['name'], si['length'], si['sequence'], si.get('features',[]))
+            st.session_state['project']  = p
+            st.session_state['seq_info'] = si
+            st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Open Existing Project
@@ -394,7 +446,8 @@ with st.sidebar:
     st.markdown("---")
     st.markdown(f"**Protocol Rules**  \nAmp: {MIN_AMPLICON}–{MAX_AMPLICON} bp  \n"
                 f"Primer: {MIN_PRIMER_LEN}–{MAX_PRIMER_LEN} bp  \nOverlap ≥ 50 bp  \n"
-                f"Amp 1 starts at base 1  \nFull vector coverage")
+                f"Amp 1 starts at base 1  \nFull vector coverage  \n"
+                f"🔁 Circular closure (last ↔ first)")
 
 tab1,tab2,tab3,tab4,tab5 = st.tabs([
     "🔬 Design Primers","🗺️ Vector Map","📊 Progress Tracker","🧫 Gel Upload","📥 Export"])
@@ -407,6 +460,10 @@ with tab1:
     st.markdown(f'<div class="upload-done">✅ <strong>Vector:</strong> {proj()["vector_name"]} — '
                 f'{proj()["vector_length"]:,} bp — {len(proj().get("vector_features",[]))} features</div>',
                 unsafe_allow_html=True)
+    st.markdown(
+        '<div class="circ-note">🔁 <strong>Circular plasmid:</strong> primer design will '
+        'make the last amplicon overlap Amplicon 1 across the origin, in addition to all '
+        'the normal consecutive overlaps.</div>', unsafe_allow_html=True)
     existing = get_best_primers(proj())
     if existing: st.info(f"ℹ️ {len(existing)} amplicons already designed.")
 
@@ -424,17 +481,29 @@ with tab1:
                       'PRIMER_SALT_MONOVALENT':50.0,'PRIMER_DNA_CONC':50.0,'PRIMER_NUM_RETURN':5,
                       'PRIMER_MAX_SELF_ANY':12,'PRIMER_MAX_SELF_END':8,
                       'PRIMER_PAIR_MAX_COMPL_ANY':12,'PRIMER_PAIR_MAX_COMPL_END':8}
-            with st.spinner("Designing primers with Primer3…"):
+            with st.spinner("Designing primers with Primer3 (circular closure included)…"):
                 primers, violations = design_all_primers(proj()['vector_sequence'], max_amp, min_over, params)
             assign_ids(primers)
             offset = len(proj()['primers'])
             for p in primers: p['_id'] += offset
             add_primers(proj(), primers)
             st.session_state.pop('confirm_pending', None)
+            st.session_state['last_designed'] = primers
 
             failed = sum(1 for p in primers if p['fp_sequence']=='DESIGN_FAILED')
             st.success(f"✅ Designed **{len(primers)}** primer pairs  |  ⚠️ {failed} failed")
-            ov_v = [v for v in violations if 'Rule 3' in v or 'Rule 4' in v]
+
+            last_valid = next((p for p in reversed(primers) if p['fp_sequence'] != 'DESIGN_FAILED'), None)
+            if last_valid:
+                if last_valid.get('wraps_origin') and last_valid.get('circular_overlap', 0) >= min_over:
+                    st.success(f"🔁 Circular closure achieved: last amplicon overlaps "
+                               f"Amplicon 1 by **{last_valid['circular_overlap']} bp** across the origin.")
+                else:
+                    st.error(f"🔁 Circular closure ❌ — last amplicon overlap with Amplicon 1 = "
+                             f"{last_valid.get('circular_overlap', 0)} bp "
+                             f"(minimum {min_over} bp required). Consider redesigning this amplicon.")
+
+            ov_v = [v for v in violations if 'Rule 3' in v or 'Rule 4' in v or 'Rule 5' in v]
             ot_v = [v for v in violations if v not in ov_v]
             if ov_v:
                 st.error("🚫 Overlap violations:")
@@ -453,16 +522,48 @@ with tab1:
                     'pair_penalty','amplicon_length','overlap_prev','overlap_next','status']
             st.dataframe(df[[c for c in show if c in df.columns]], use_container_width=True)
 
+    # ── Post-design downloads: order sheet + long/short result files ─────────
+    latest_batch = st.session_state.get('last_designed')
+    if latest_batch:
+        st.markdown("---")
+        st.markdown("**📥 Download this design run**")
+        dc1, dc2, dc3 = st.columns(3)
+        with dc1:
+            st.download_button(
+                "🧾 Order Primers (CSV)",
+                data=primers_to_order_csv_bytes(latest_batch),
+                file_name=f"{pname}_order_primers.csv", mime="text/csv",
+                key="dl_order_tab1",
+                help="Primer Name, Sequence, Number of Bases — ready to paste into an oligo order sheet."
+            )
+        with dc2:
+            st.download_button(
+                "📄 Full Results (Excel, long format)",
+                data=primers_to_excel_bytes(latest_batch, pname),
+                file_name=f"{pname}_primers_full.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_long_tab1"
+            )
+        with dc3:
+            st.download_button(
+                "📋 Summary Results (Excel, short format)",
+                data=primers_to_summary_excel_bytes(latest_batch, pname),
+                file_name=f"{pname}_primers_summary.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_short_tab1"
+            )
+
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — Vector Map
 # ══════════════════════════════════════════════════════════════════════════════
 with tab2:
-    st.markdown('<div class="section-header">Interactive Linear Vector Map</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">Interactive Linear Vector Map (Circular Vector)</div>', unsafe_allow_html=True)
     best = get_best_primers(proj())
     if not best: st.info("No primers designed yet.")
     else:
         st.components.v1.html(build_interactive_map(si, best), height=440, scrolling=True)
-        st.caption("💡 Click any amplicon for details | ESC to close | Show Sequence → Ctrl+F")
+        st.caption("💡 Click any amplicon for details | ESC to close | Show Sequence → Ctrl+F | "
+                   "🔁 cyan highlight near position 0 = circular overlap with the last amplicon")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — Progress Tracker
@@ -483,6 +584,18 @@ with tab3:
     if total > 0:
         st.markdown(f"**Progress: {done}/{total} ({done/total*100:.0f}%)**")
         st.progress(done/total)
+
+    if best:
+        last = best[-1]
+        if last.get('wraps_origin') and last.get('circular_overlap', 0) >= 50:
+            st.markdown(f'<span class="circ-badge">🔁 Circular closure OK — '
+                        f'{last["circular_overlap"]} bp overlap with Amplicon 1</span>',
+                        unsafe_allow_html=True)
+        else:
+            st.markdown(f'<span class="circ-badge" style="background:#FDECEA;color:#721C24;'
+                        f'border-color:#D55E00">🔁 Circular closure NOT satisfied — '
+                        f'{last.get("circular_overlap",0)} bp (redesign Amplicon '
+                        f'{last["amplicon_num"]})</span>', unsafe_allow_html=True)
 
     st.markdown("---")
 
@@ -517,8 +630,9 @@ with tab3:
                                     key=f"chk_{p['_id']}", label_visibility="collapsed")
 
         # Info
+        wrap_tag = " &nbsp; 🔁" if p.get('wraps_origin') else ""
         col_info.markdown(
-            f"**{label}** &nbsp; v{p['version']} &nbsp;|&nbsp; "
+            f"**{label}**{wrap_tag} &nbsp; v{p['version']} &nbsp;|&nbsp; "
             f"{p['amplicon_start']}–{p['amplicon_end']} bp &nbsp;|&nbsp; "
             f"{p['amplicon_length']} bp &nbsp;|&nbsp; "
             f"🔼 {fmt_ov(p.get('overlap_prev'))} &nbsp; 🔽 {fmt_ov(p.get('overlap_next'))} &nbsp;&nbsp;"
@@ -557,6 +671,9 @@ with tab3:
                     f"🔼 Upstream: {ov_badge(p.get('overlap_prev'))} &nbsp; "
                     f"🔽 Downstream: {ov_badge(p.get('overlap_next'))}",
                     unsafe_allow_html=True)
+                if p.get('wraps_origin'):
+                    st.markdown(f'🔁 **Wraps plasmid origin** — overlaps Amplicon 1 by '
+                                f'**{p.get("circular_overlap",0)} bp**')
             with d2:
                 st.markdown(f"**Version:** v{p['version']}")
                 st.markdown(f"**Position:** {p['amplicon_start']}–{p['amplicon_end']}")
@@ -632,6 +749,7 @@ with tab4:
 with tab5:
     st.markdown('<div class="section-header">Export Results</div>', unsafe_allow_html=True)
     all_primers = proj().get('primers',[])
+    best_primers = get_best_primers(proj())
     pcr_runs    = proj().get('pcr_runs',[])
 
     st.markdown("#### 💾 Save Project File")
@@ -641,19 +759,38 @@ with tab5:
     st.caption("Contains everything: primers, gel images (embedded), PCR runs, redesign history.")
 
     st.markdown("---")
-    c1, c2 = st.columns(2)
+    st.markdown("#### 📊 Result Files")
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
-        if st.button("📊 Generate Excel", type="primary"):
+        if st.button("📊 Generate Full Excel (long format)", type="primary"):
             buf = primers_to_excel_bytes(all_primers, pname)
-            st.download_button("⬇️ Download Excel", data=buf,
-                file_name=f"{pname}_primers.xlsx",
+            st.download_button("⬇️ Download Full Excel", data=buf,
+                file_name=f"{pname}_primers_full.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="dl_excel")
     with c2:
+        if st.button("📋 Generate Summary Excel (short format)"):
+            buf = primers_to_summary_excel_bytes(best_primers, pname)
+            st.download_button("⬇️ Download Summary Excel", data=buf,
+                file_name=f"{pname}_primers_summary.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_summary_excel")
+    with c3:
+        if st.button("🧾 Generate Order Primers (CSV)"):
+            buf = primers_to_order_csv_bytes(best_primers)
+            st.download_button("⬇️ Download Order CSV", data=buf,
+                file_name=f"{pname}_order_primers.csv", mime="text/csv",
+                key="dl_order_csv")
+    with c4:
         if st.button("📄 Generate PDF Report"):
             buf = primers_to_pdf_bytes(pname, all_primers, pcr_runs)
             st.download_button("⬇️ Download PDF", data=buf,
                 file_name=f"{pname}_report.pdf", mime="application/pdf", key="dl_pdf")
+
+    st.caption("**Full Excel** = every field currently tracked (long format). "
+               "**Summary Excel** = Amplicon No, Amplicon Name, FP/RP sequence, GC%, Tm, "
+               "amplicon length, overlap_prev, overlap_next (short format). "
+               "**Order CSV** = one row per primer — Primer Name, Sequence, Number of Bases.")
 
     history = proj().get('redesign_history',[])
     if history:

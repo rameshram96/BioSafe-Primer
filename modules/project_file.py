@@ -4,9 +4,9 @@ Everything in memory. No disk writes ever.
 Gel images stored as base64 inside project dict.
 Excel/PDF generated into BytesIO buffers.
 """
-import json, base64, copy
+import json, base64, copy, csv
 from datetime import datetime
-from io import BytesIO
+from io import BytesIO, StringIO
 from collections import defaultdict
 
 BSP_VERSION = "1.0"
@@ -199,6 +199,95 @@ def primers_to_excel_bytes(primers, project_name):
 
     buf = BytesIO()
     wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+def primers_to_summary_excel_bytes(primers, project_name):
+    """
+    SHORT-FORMAT result export (.xlsx).
+    Columns: Amplicon No, Amplicon Name, FP_SEQUENCE, fp_gc, fp_tm,
+             RP_SEQUENCE, rp_gc, rp_tm, amplicon_length,
+             overlap_prev, overlap_next
+    """
+    import openpyxl
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    headers = ['Amplicon No', 'Amplicon Name', 'FP_SEQUENCE', 'fp_gc', 'fp_tm',
+               'RP_SEQUENCE', 'rp_gc', 'rp_tm', 'amplicon_length',
+               'overlap_prev', 'overlap_next']
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Primer Summary"
+
+    total_cols = len(headers)
+    ws.merge_cells(f'A1:{get_column_letter(total_cols)}1')
+    tc = ws['A1']
+    tc.value = f"Primer Summary (Short Format) — {project_name}"
+    tc.font  = Font(bold=True, size=13, color='FFFFFF')
+    tc.fill  = PatternFill('solid', fgColor='1A237E')
+    tc.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[1].height = 26
+
+    hfill  = PatternFill('solid', fgColor='283593')
+    hfont  = Font(bold=True, color='FFFFFF', size=10)
+    border = Border(
+        left=Side(style='thin', color='9FA8DA'), right=Side(style='thin', color='9FA8DA'),
+        top=Side(style='thin', color='9FA8DA'), bottom=Side(style='thin', color='9FA8DA')
+    )
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=2, column=col, value=h)
+        cell.fill = hfill; cell.font = hfont; cell.border = border
+        cell.alignment = Alignment(horizontal='center', wrap_text=True)
+    ws.row_dimensions[2].height = 22
+
+    for ri, p in enumerate(primers, 3):
+        row = [
+            p['amplicon_num'],
+            p.get('amplicon_name', f"Amplicon_{p['amplicon_num']}"),
+            p['fp_sequence'], p['fp_gc'], p['fp_tm'],
+            p['rp_sequence'], p['rp_gc'], p['rp_tm'],
+            p['amplicon_length'],
+            p.get('overlap_prev') if p.get('overlap_prev') is not None else 'N/A',
+            p.get('overlap_next') if p.get('overlap_next') is not None else 'N/A',
+        ]
+        for ci, val in enumerate(row, 1):
+            cell = ws.cell(row=ri, column=ci, value=val)
+            cell.border = border
+            cell.alignment = Alignment(horizontal='center', wrap_text=True)
+            if ci in [3, 6]:
+                cell.font = Font(name='Courier New', size=9)
+                cell.alignment = Alignment(horizontal='left')
+
+    col_widths = [10, 20, 30, 8, 8, 30, 8, 8, 13, 12, 13]
+    for i, w in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = 'A3'
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+def primers_to_order_csv_bytes(primers):
+    """
+    "Order Primers" export (.csv) — one row per FP and per RP, ready to
+    paste into an oligo-order sheet.
+    Columns: Primer Name, Sequence (5'->3'), Number of Bases
+    """
+    sio = StringIO()
+    writer = csv.writer(sio)
+    writer.writerow(["Primer Name", "Sequence (5'->3')", "Number of Bases"])
+    for p in primers:
+        if p.get('fp_sequence') == 'DESIGN_FAILED':
+            continue
+        label = p.get('amplicon_name') or f"Amplicon_{p['amplicon_num']}"
+        writer.writerow([f"{label}_FP", p['fp_sequence'], p['fp_length']])
+        writer.writerow([f"{label}_RP", p['rp_sequence'], p['rp_length']])
+    buf = BytesIO(sio.getvalue().encode('utf-8'))
     buf.seek(0)
     return buf
 

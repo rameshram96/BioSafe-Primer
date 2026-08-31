@@ -157,6 +157,9 @@ def _extract_best(result, offset, amplicon_num, version, max_amplicon=MAX_AMPLIC
             # Overlap (filled after all amplicons designed)
             'overlap_next':       0,
             'overlap_prev':       0,
+            # Circular vector metadata (filled after all amplicons designed)
+            'wraps_origin':       False,
+            'circular_overlap':   0,
             # Metadata
             'amplicon_name':      f'Amplicon_{amplicon_num}',
             'version':            version,
@@ -181,10 +184,129 @@ def _failed_placeholder(amplicon_num, seg_start, seg_end):
         'amplicon_start':  seg_start, 'amplicon_end': seg_end,
         'amplicon_length': seg_end - seg_start,
         'overlap_next': 0, 'overlap_prev': 0,
+        'wraps_origin': False, 'circular_overlap': 0,
         'amplicon_name':   f'Amplicon_{amplicon_num}',
         'version': 1,      'status': 'Design Failed',
         'violations': [f'Amplicon {amplicon_num}: Primer3 design failed'],
     }
+
+
+def _design_circular_overlap(sequence, last_amp, first_amp, min_overlap, params,
+                              max_amplicon=MAX_AMPLICON):
+    """
+    Redesign the FP/RP of the LAST amplicon so it reads through the origin
+    of the (circular) vector and overlaps Amplicon 1 by >= min_overlap bp.
+
+    Strategy: build a synthetic linear template starting at the last
+    amplicon's FP position and running off the physical end of the vector
+    into a short "wrap pad" taken from the start of the vector (0..pad).
+    Primer3 is then confined to keep FP near the start of that template
+    (same region it would normally use) and to keep RP inside the wrap pad,
+    which guarantees the resulting amplicon reads across the origin.
+
+    Returns a dict of updated fields to merge into `last_amp`, or None if
+    Primer3 could not find a qualifying pair.
+    """
+    seq_len    = len(sequence)
+    last_start = last_amp['amplicon_start']
+
+    # How far past the origin we need to search: enough to cover the
+    # requested overlap plus a safety buffer, but at least far enough to
+    # reach past the end of Amplicon 1.
+    pad = min(seq_len, max(first_amp['amplicon_end'], 1) + min_overlap + 50)
+    if pad < 1:
+        return None
+
+    wrap_seq = sequence[last_start:] + sequence[:pad]
+    seg_len  = len(wrap_seq)
+    tail_len = seq_len - last_start  # index in wrap_seq where the origin wrap begins
+
+    prod_min = MIN_AMPLICON
+    prod_max = min(max_amplicon, seg_len)
+    if prod_min >= prod_max:
+        prod_max = min(seg_len, prod_min + 50)
+    if prod_min >= prod_max:
+        return None
+
+    fp_zone_len = min(FP_ZONE_WIDTH, max(1, tail_len))
+    rp_zone_start = tail_len + max(0, min_overlap - 5)
+    rp_zone_len   = seg_len - rp_zone_start
+    if rp_zone_start >= seg_len or rp_zone_len < 1:
+        return None
+
+    seq_args = {'SEQUENCE_ID': 'amp_wrap', 'SEQUENCE_TEMPLATE': wrap_seq,
+                'SEQUENCE_PRIMER_PAIR_OK_REGION_LIST':
+                    [[0, fp_zone_len, rp_zone_start, rp_zone_len]]}
+    global_args = params.copy()
+    global_args['PRIMER_PRODUCT_SIZE_RANGE'] = [[prod_min, prod_max]]
+
+    result = None
+    try:
+        r = primer3.design_primers(seq_args, global_args)
+        if r.get('PRIMER_PAIR_NUM_RETURNED', 0) > 0:
+            result = r
+    except Exception:
+        result = None
+
+    if result is None:
+        # Fallback: widen FP zone, keep RP confined to the wrap pad only
+        try:
+            seq_args_fb = {'SEQUENCE_ID': 'amp_wrap_fb', 'SEQUENCE_TEMPLATE': wrap_seq,
+                            'SEQUENCE_PRIMER_PAIR_OK_REGION_LIST':
+                                [[0, min(FP_ZONE_WIDTH * 2, tail_len or 1),
+                                  tail_len, seg_len - tail_len]]}
+            r = primer3.design_primers(seq_args_fb, global_args)
+            if r.get('PRIMER_PAIR_NUM_RETURNED', 0) > 0:
+                result = r
+        except Exception:
+            result = None
+
+    if result is None:
+        return None
+
+    for i in range(result.get('PRIMER_PAIR_NUM_RETURNED', 0)):
+        product = result.get(f'PRIMER_PAIR_{i}_PRODUCT_SIZE', 0)
+        if product > max_amplicon or product < MIN_AMPLICON:
+            continue
+        fp_seq = result.get(f'PRIMER_LEFT_{i}_SEQUENCE', '')
+        rp_seq = result.get(f'PRIMER_RIGHT_{i}_SEQUENCE', '')
+        if not (MIN_PRIMER_LEN <= len(fp_seq) <= MAX_PRIMER_LEN):
+            continue
+        if not (MIN_PRIMER_LEN <= len(rp_seq) <= MAX_PRIMER_LEN):
+            continue
+
+        fp_pos = result.get(f'PRIMER_LEFT_{i}',  [0, 0])
+        rp_pos = result.get(f'PRIMER_RIGHT_{i}', [0, 0])
+        raw_end = rp_pos[0] + 1
+        if raw_end <= tail_len:
+            continue  # didn't actually reach the origin — skip
+        overlap = raw_end - tail_len
+        if overlap < min_overlap:
+            continue
+
+        return {
+            'fp_sequence':      fp_seq,
+            'rp_sequence':      rp_seq,
+            'fp_length':        len(fp_seq),
+            'rp_length':        len(rp_seq),
+            'fp_tm':            round(result.get(f'PRIMER_LEFT_{i}_TM', 0), 2),
+            'rp_tm':            round(result.get(f'PRIMER_RIGHT_{i}_TM', 0), 2),
+            'fp_gc':            round(result.get(f'PRIMER_LEFT_{i}_GC_PERCENT', 0), 1),
+            'rp_gc':            round(result.get(f'PRIMER_RIGHT_{i}_GC_PERCENT', 0), 1),
+            'fp_hairpin_tm':    round(result.get(f'PRIMER_LEFT_{i}_HAIRPIN_TH', 0), 2),
+            'rp_hairpin_tm':    round(result.get(f'PRIMER_RIGHT_{i}_HAIRPIN_TH', 0), 2),
+            'fp_end_stability': round(result.get(f'PRIMER_LEFT_{i}_END_STABILITY', 0), 2),
+            'rp_end_stability': round(result.get(f'PRIMER_RIGHT_{i}_END_STABILITY', 0), 2),
+            'fp_penalty':       round(result.get(f'PRIMER_LEFT_{i}_PENALTY', 0), 4),
+            'rp_penalty':       round(result.get(f'PRIMER_RIGHT_{i}_PENALTY', 0), 4),
+            'pair_penalty':     round(result.get(f'PRIMER_PAIR_{i}_PENALTY', 0), 4),
+            'amplicon_start':   last_start + fp_pos[0],
+            'amplicon_length':  product,
+            'wraps_origin':     True,
+            'circular_overlap': overlap,
+            'overlap_next':     overlap,
+        }
+    return None
 
 
 def validate_primers(all_primers, min_overlap=50, max_amplicon=MAX_AMPLICON):
@@ -222,19 +344,36 @@ def validate_primers(all_primers, min_overlap=50, max_amplicon=MAX_AMPLICON):
                     f"Rule 3 ❌ Amplicon {p['amplicon_num']}–{nxt['amplicon_num']}: "
                     f"overlap = {overlap} bp (minimum {min_overlap} bp required)"
                 )
+
+    # Rule 5: circular vector — last amplicon must overlap Amplicon 1 across the origin
+    if len(valid) >= 1:
+        last  = valid[-1]
+        first = valid[0]
+        if last.get('wraps_origin') and last.get('circular_overlap', 0) >= min_overlap:
+            pass  # satisfied
+        else:
+            co = last.get('circular_overlap', 0)
+            violations.append(
+                f"Rule 5 ❌ Circular overlap between Amplicon {last['amplicon_num']} "
+                f"(last) and Amplicon {first['amplicon_num']} (first) across the "
+                f"plasmid origin = {co} bp (minimum {min_overlap} bp required)"
+            )
     return violations
 
 
 def design_all_primers(sequence, max_amplicon=MAX_AMPLICON,
                         min_overlap=50, params=None):
     """
-    Design overlapping primers covering the full vector.
+    Design overlapping primers covering the full — CIRCULAR — vector.
     Rules enforced:
       1. Amplicon 1 FP starts at base 1
       2. Every amplicon 150–500 bp
       3. Consecutive overlap >= 50 bp
       4. Full vector coverage — no gaps
-      5. Short terminal segments (<150 bp) merged into previous amplicon
+      5. Circular closure: the last amplicon reads through the origin and
+         overlaps Amplicon 1 by >= min_overlap bp (the vector is a plasmid,
+         not a linear fragment)
+      6. Short terminal segments (<150 bp) merged into previous amplicon
     """
     if params is None:
         params = DEFAULT_PARAMS.copy()
@@ -318,10 +457,40 @@ def design_all_primers(sequence, max_amplicon=MAX_AMPLICON,
         seg_start    = next_seg_start
         amplicon_num += 1
 
+    # ── Circular closure: make the last amplicon overlap Amplicon 1 ──────────
+    # The vector is treated as a circular plasmid, so the amplicon that ends
+    # at (or near) the last base of the sequence must read through the origin
+    # and overlap Amplicon 1 by at least `min_overlap` bp.
+    # NOTE: use the last/first VALID (non-failed) amplicons — the very last
+    # entry in `all_primers` may itself be a DESIGN_FAILED placeholder.
+    valid_first = next((p for p in all_primers if p['fp_sequence'] != 'DESIGN_FAILED'), None)
+    valid_last  = next((p for p in reversed(all_primers) if p['fp_sequence'] != 'DESIGN_FAILED'), None)
+
+    if valid_first and valid_last and valid_first is not valid_last:
+        wrap_fields = _design_circular_overlap(
+            sequence, valid_last, valid_first, min_overlap, params, max_amplicon
+        )
+        if wrap_fields:
+            valid_last.update(wrap_fields)
+        else:
+            valid_last['wraps_origin']     = False
+            valid_last['circular_overlap'] = 0
+    elif valid_last:
+        # Only one valid amplicon covers the whole vector — a single linear
+        # PCR product cannot itself "overlap the origin", so circular
+        # closure cannot be satisfied and is flagged as a violation below.
+        valid_last['wraps_origin']     = False
+        valid_last['circular_overlap'] = 0
+
     # Recalculate overlap_prev / overlap_next from actual positions
-    if all_primers:
-        all_primers[0]['overlap_prev']  = None
-        all_primers[-1]['overlap_next'] = None
+    if valid_first and valid_last:
+        circ_overlap = (valid_last.get('circular_overlap', 0)
+                         if valid_last.get('wraps_origin') else None)
+        # For a circular vector, Amplicon 1's "upstream" neighbour is the last
+        # amplicon (across the origin), and the last amplicon's "downstream"
+        # neighbour is Amplicon 1.
+        valid_first['overlap_prev'] = circ_overlap
+        valid_last['overlap_next']  = circ_overlap
     for i in range(len(all_primers) - 1):
         curr = all_primers[i]
         nxt  = all_primers[i + 1]
@@ -343,6 +512,21 @@ def design_all_primers(sequence, max_amplicon=MAX_AMPLICON,
                     f"Rule 3 ❌ Downstream overlap = {curr['overlap_next']} bp "
                     f"(minimum {min_overlap} bp) — redesign required"
                 ]
+
+    # Mark circular-closure violation on the last valid amplicon
+    if valid_last is not None:
+        if not (valid_last.get('wraps_origin') and
+                valid_last.get('circular_overlap', 0) >= min_overlap):
+            if valid_last is valid_first:
+                note = ("a single amplicon cannot overlap itself across the origin — "
+                         "at least 2 amplicons are required for a circular vector")
+            else:
+                note = (f"= {valid_last.get('circular_overlap', 0)} bp "
+                        f"(minimum {min_overlap} bp) — redesign required")
+            valid_last['status'] = 'Overlap Violation'
+            valid_last['violations'] = valid_last.get('violations', []) + [
+                f"Rule 5 ❌ Circular overlap with Amplicon 1 across the origin {note}"
+            ]
 
     violations = validate_primers(all_primers, min_overlap, max_amplicon)
     for p in all_primers:
@@ -423,6 +607,11 @@ def redesign_primers(sequence, seg_start, seg_end, amplicon_num,
       - primer_or_list: single primer dict, or list of two dicts if split
       - error_message: None on success, string on failure
       - is_split: True if region was split into two amplicons
+
+    Note: if this is the LAST amplicon of a circular vector, redesigning it
+    here does not automatically re-verify the circular overlap with
+    Amplicon 1 — re-run the full design, or manually confirm the wrap-around
+    overlap (Rule 5) after accepting a manual redesign of the final amplicon.
     """
     if old_version >= MAX_REDESIGN_VERSIONS:
         return None, (f"Maximum redesign attempts ({MAX_REDESIGN_VERSIONS}) "

@@ -46,3 +46,41 @@ def detect_format(filename):
         return 'fasta'
     else:
         return 'fasta'
+
+
+def parse_pasted_sequence(text, seq_name="Pasted_Sequence"):
+    """
+    Parse sequence pasted directly into a text box.
+    Accepts three kinds of pasted content:
+      1. FASTA text (starts with '>')
+      2. GenBank text (starts with 'LOCUS')
+      3. Raw sequence with no header (letters only, or letters mixed with
+         whitespace/numbers e.g. copied from a numbered text file) — this is
+         wrapped into a minimal FASTA record using `seq_name`.
+    Returns the same dict shape as parse_sequence().
+    """
+    if text is None:
+        raise ValueError("No sequence text provided.")
+    text = text.strip()
+    if not text:
+        raise ValueError("Pasted sequence is empty.")
+
+    stripped_upper = text.upper()
+    if stripped_upper.startswith('LOCUS'):
+        return parse_sequence(text, 'genbank')
+
+    if text.startswith('>'):
+        return parse_sequence(text, 'fasta')
+
+    # Raw / plain sequence: keep only letters (drops line numbers, spaces,
+    # accidental digits, and stray whitespace that often come from copy-paste).
+    cleaned = ''.join(ch for ch in text if ch.isalpha())
+    if not cleaned:
+        raise ValueError(
+            "No valid sequence characters found in the pasted text. "
+            "Paste a FASTA record (starting with '>'), a GenBank record "
+            "(starting with 'LOCUS'), or the raw sequence letters."
+        )
+    name = (seq_name or "Pasted_Sequence").strip().replace(' ', '_') or "Pasted_Sequence"
+    fasta_text = f">{name}\n{cleaned}\n"
+    return parse_sequence(fasta_text, 'fasta')

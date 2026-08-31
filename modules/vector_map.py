@@ -2,6 +2,8 @@
 Interactive linear vector map — HTML/JS.
 Fixes: ESC close, screen-boundary popup, min clickable width,
        enlarged close button, full sequence panel with position markers.
+Circular vectors: shows the wrap-around overlap between the last amplicon
+and Amplicon 1 across the plasmid origin.
 """
 
 STATUS_COLORS = {
@@ -57,9 +59,18 @@ def build_interactive_map(seq_info, primers):
             'name':         p.get('amplicon_name', f'Amplicon_{p["amplicon_num"]}'),
             'overlap_prev': p.get('overlap_prev'),
             'overlap_next': p.get('overlap_next'),
+            'wraps_origin': p.get('wraps_origin', False),
+            'circular_overlap': p.get('circular_overlap', 0),
             'color':        AMP_PALETTE[i % len(AMP_PALETTE)],
             'status_color': STATUS_COLORS.get(p.get('status','Pending'), '#78909c'),
         })
+
+    circ_overlap = 0
+    circ_ok = False
+    if amp_data:
+        last = amp_data[-1]
+        circ_overlap = last.get('circular_overlap', 0) or 0
+        circ_ok = bool(last.get('wraps_origin')) and circ_overlap >= 50
 
     import json
     amp_json     = json.dumps(amp_data)
@@ -86,6 +97,11 @@ def build_interactive_map(seq_info, primers):
         )
     seq_html = '\n'.join(seq_lines)
 
+    circ_badge_color = '#2e7d32' if circ_ok else '#b71c1c'
+    circ_badge_text  = (f'🔁 Circular closure: {circ_overlap} bp overlap with Amplicon 1'
+                        if circ_overlap else
+                        '🔁 Circular closure: not yet achieved')
+
     html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -103,6 +119,10 @@ body {{
 #map-title {{
   color:#90caf9; font-size:13px; font-weight:600;
   margin-bottom:12px; letter-spacing:0.5px;
+}}
+#circ-badge {{
+  display:inline-block; margin-left:10px; padding:2px 10px;
+  border-radius:12px; font-size:11px; font-weight:700; color:white;
 }}
 svg {{ width:100%; display:block; }}
 
@@ -204,9 +224,10 @@ svg {{ width:100%; display:block; }}
 
 <div id="map-container">
   <div id="map-title">
-    🧬 {seq_info['name']} &nbsp;|&nbsp; {seq_len:,} bp
+    🧬 {seq_info['name']} &nbsp;|&nbsp; {seq_len:,} bp (circular)
     &nbsp;|&nbsp; Click any amplicon for full details
     &nbsp;|&nbsp; <span style="color:#ffd54f">ESC</span> to close panel
+    <span id="circ-badge" style="background:{circ_badge_color}">{circ_badge_text}</span>
   </div>
   <svg id="vec-svg" viewBox="0 0 1000 230"
        preserveAspectRatio="xMidYMid meet"></svg>
@@ -217,6 +238,7 @@ svg {{ width:100%; display:block; }}
     <div class="legend-item"><div class="legend-dot" style="background:#b71c1c"></div>Failed</div>
     <div class="legend-item"><div class="legend-dot" style="background:#6a1b9a"></div>Overlap Violation</div>
     <div class="legend-item"><div class="legend-dot" style="background:#ffd54f;height:8px;border-radius:2px"></div>Overlap region</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#00e5ff;height:8px;border-radius:2px"></div>Circular (origin) overlap</div>
     <div class="legend-item"><div class="legend-dot" style="background:#1565c0;height:8px;border-radius:2px"></div>Feature</div>
   </div>
 
@@ -226,7 +248,8 @@ svg {{ width:100%; display:block; }}
     Min overlap: 50 bp &nbsp;|&nbsp;
     Primer length: 18–25 bp &nbsp;|&nbsp;
     Amplicon 1 must start at base 1 &nbsp;|&nbsp;
-    Full vector coverage required
+    Full vector coverage required &nbsp;|&nbsp;
+    Circular closure: last amplicon must overlap Amplicon 1 across the origin
   </div>
 
   <div id="seq-toggle" onclick="toggleSeq()">
@@ -287,11 +310,25 @@ function drawMap() {{
     }}
   }});
 
-  // Overlap highlights
+  // Overlap highlights (adjacent junctions)
   for(let i=0;i<AMPS.length-1;i++){{
     const cur=AMPS[i], nxt=AMPS[i+1];
     const ox=bp2x(nxt.start), ow=bp2x(cur.end)-bp2x(nxt.start);
     if(ow>0) svg.appendChild(mkEl('rect',{{x:ox,y:AMP_Y-5,width:ow,height:AMP_H+10,fill:'#ffd54f',opacity:0.15,rx:2}}));
+  }}
+
+  // Circular (origin) overlap highlight — last amplicon wraps back to Amplicon 1
+  if (AMPS.length > 0) {{
+    const last = AMPS[AMPS.length-1];
+    const first = AMPS[0];
+    const co = last.circular_overlap || 0;
+    if (co > 0) {{
+      const ow = Math.max(3, bp2x(co) - bp2x(0));
+      svg.appendChild(mkEl('rect',{{x:30,y:AMP_Y-5,width:ow,height:AMP_H+10,fill:'#00e5ff',opacity:0.18,rx:2}}));
+      const t = mkEl('text',{{x:30+ow/2,y:AMP_Y-10,'text-anchor':'middle',fill:'#00e5ff','font-size':8,'font-weight':'bold'}});
+      t.textContent = `🔁 ${{co}} bp`;
+      svg.appendChild(t);
+    }}
   }}
 
   // Amplicons
@@ -332,6 +369,14 @@ function drawMap() {{
       t.textContent=`A${{amp.num}}`;
       svg.appendChild(t);
     }}
+
+    // Circular wrap marker on the last amplicon
+    if (idx === AMPS.length-1 && amp.wraps_origin) {{
+      const t2=mkEl('text',{{x:x+w-4,y:y-6,'text-anchor':'end',
+        fill:'#00e5ff','font-size':9,'font-weight':'bold','pointer-events':'none'}});
+      t2.textContent='🔁';
+      svg.appendChild(t2);
+    }}
   }});
 }}
 
@@ -341,13 +386,18 @@ function showDetail(idx, evt) {{
     `${{amp.name}}  ·  v${{amp.version}}  ·  ${{amp.status}}`;
 
   const prevOv = amp.overlap_prev != null
-    ? `${{amp.overlap_prev}} bp` : 'N/A (first amplicon)';
+    ? `${{amp.overlap_prev}} bp` : 'N/A';
   const nextOv = amp.overlap_next != null
-    ? `${{amp.overlap_next}} bp` : 'N/A (last amplicon)';
+    ? `${{amp.overlap_next}} bp` : 'N/A';
   const prevWarn = (amp.overlap_prev != null && amp.overlap_prev < 50)
     ? ' <span class="warn">⚠ below 50 bp</span>' : '';
   const nextWarn = (amp.overlap_next != null && amp.overlap_next < 50)
     ? ' <span class="warn">⚠ below 50 bp</span>' : '';
+
+  const circNote = amp.wraps_origin
+    ? `<div class="overlap-row"><span style="color:#00e5ff">🔁 Wraps plasmid origin</span>
+       <span class="ov-val">${{amp.circular_overlap}} bp overlap with Amplicon 1</span></div>`
+    : '';
 
   document.getElementById('dp-body').innerHTML = `
     <div class="section-title">📍 Amplicon Info</div>
@@ -417,13 +467,14 @@ function showDetail(idx, evt) {{
     <div class="overlap-box">
       <div class="section-title" style="margin-top:0">⬌ Overlap Coverage</div>
       <div class="overlap-row">
-        <span style="color:#90caf9">⬆ Upstream (with Amp ${{amp.num-1}})</span>
+        <span style="color:#90caf9">⬆ Upstream</span>
         <span class="ov-val">${{prevOv}}${{prevWarn}}</span>
       </div>
       <div class="overlap-row">
-        <span style="color:#90caf9">⬇ Downstream (with Amp ${{amp.num+1}})</span>
+        <span style="color:#90caf9">⬇ Downstream</span>
         <span class="ov-val">${{nextOv}}${{nextWarn}}</span>
       </div>
+      ${{circNote}}
     </div>
   `;
 

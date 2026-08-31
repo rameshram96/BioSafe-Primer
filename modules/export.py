@@ -281,7 +281,6 @@ def export_full_report_pdf(project_name, primers, pcr_runs,
                         ('ALIGN',   (0,0),(-1,-1),'CENTER'),
                         ('GRID',    (0,0),(-1,-1),0.3,
                          colors.HexColor('#9FA8DA')),
-                        ('PADDING', (0,0),(-1,-1),4),
                     ]))
                     story.append(tbl)
                     story.append(Spacer(1, 0.3*cm))
