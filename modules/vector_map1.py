@@ -1,12 +1,13 @@
 """
-Interactive circular vector map — HTML/JS/SVG.
-Amplicons only (no separate feature ring), drawn as two alternating
-concentric bands so overlapping amplicons never visually collide.
-Labels sit outside the ring on leader lines (SnapGene-style).
-Base 1 is at 12 o'clock, increasing clockwise.
+Interactive CIRCULAR vector map — HTML/JS.
+Backbone ring, amplicon arcs (outer ring, alternating radius bands so
+labels don't collide), overlap highlight arcs between consecutive
+amplicons, a distinctly colored closure-overlap arc between the last and
+first amplicon (where the circular vector joins back on itself),
+click-to-inspect detail panel (screen-boundary safe), searchable sequence
+panel, legend and protocol rules box. GenBank/NCBI-parsed sequence
+features are intentionally NOT rendered on this map.
 """
-import json
-import math
 
 STATUS_COLORS = {
     'Done':              '#2e7d32',
@@ -17,38 +18,21 @@ STATUS_COLORS = {
     'Redesigned':        '#1565c0',
 }
 AMP_PALETTE = [
-    '#4C9BE8', '#E8834C', '#4CE87A', '#E84C4C',
-    '#A04CE8', '#E8D44C', '#4CE8D4', '#E84CA0',
-    '#8CE84C', '#4C4CE8', '#E84C82', '#4CE8B4',
+    '#4C9BE8','#E8834C','#4CE87A','#E84C4C',
+    '#A04CE8','#E8D44C','#4CE8D4','#E84CA0',
+    '#8CE84C','#4C4CE8','#E84C82','#4CE8B4',
 ]
-
-# ── Geometry constants (viewBox is 800 x 800, center at 400,400) ──────────────
-CX, CY        = 400, 400
-RING_A_OUTER, RING_A_INNER = 300, 260   # even-index amplicons (outer band)
-RING_B_OUTER, RING_B_INNER = 248, 208   # odd-index amplicons (inner band)
-BACKBONE_R    = 322                     # thin reference circle + ticks
-TICK_OUT_R    = 334
-TICK_LABEL_R  = 348
-LEADER_END_R  = 360                     # where leader lines terminate
-LABEL_TEXT_R  = 372                     # where the text sits
-
-
-def _polar(r, angle_deg):
-    """Point on a circle of radius r at angle_deg measured clockwise from top."""
-    rad = math.radians(angle_deg)
-    x = CX + r * math.sin(rad)
-    y = CY - r * math.cos(rad)
-    return x, y
 
 
 def build_interactive_map(seq_info, primers):
     seq_len  = seq_info['length']
     sequence = seq_info.get('sequence', '')
+    # Note: GenBank/NCBI-parsed features (seq_info['features']) are
+    # intentionally not rendered on this map.
 
     amp_data = []
     for i, p in enumerate(primers):
         amp_data.append({
-            'idx':          i,
             'num':          p['amplicon_num'],
             'start':        p['amplicon_start'],
             'end':          p['amplicon_end'],
@@ -74,17 +58,18 @@ def build_interactive_map(seq_info, primers):
             'overlap_prev': p.get('overlap_prev'),
             'overlap_next': p.get('overlap_next'),
             'color':        AMP_PALETTE[i % len(AMP_PALETTE)],
-            'status_color': STATUS_COLORS.get(p.get('status', 'Pending'), '#78909c'),
+            'status_color': STATUS_COLORS.get(p.get('status','Pending'), '#78909c'),
         })
 
+    import json
     amp_json = json.dumps(amp_data)
 
-    # Sequence panel with position markers every 10 bp (unchanged behaviour)
+    # Build sequence with position markers every 10 bp
     seq_lines = []
     chunk = 60
     for i in range(0, len(sequence), chunk):
         pos    = i + 1
-        seg    = sequence[i:i + chunk]
+        seg    = sequence[i:i+chunk]
         marked = ''
         for j, base in enumerate(seg):
             abs_pos = i + j + 1
@@ -92,7 +77,9 @@ def build_interactive_map(seq_info, primers):
                 marked += f'<span class="pos-mark">{base}</span>'
             else:
                 marked += base
-        seq_lines.append(f'<span class="pos-label">{pos:>6}</span>  {marked}')
+        seq_lines.append(
+            f'<span class="pos-label">{pos:>6}</span>  {marked}'
+        )
     seq_html = '\n'.join(seq_lines)
 
     html = f"""<!DOCTYPE html>
@@ -113,8 +100,7 @@ body {{
   color:#90caf9; font-size:13px; font-weight:600;
   margin-bottom:12px; letter-spacing:0.5px;
 }}
-#svg-wrap {{ display:flex; justify-content:center; }}
-svg {{ width:100%; max-width:640px; display:block; }}
+svg {{ width:100%; max-width:680px; height:auto; display:block; margin:0 auto; }}
 
 /* ── Detail Panel ── */
 #detail-panel {{
@@ -205,7 +191,7 @@ svg {{ width:100%; max-width:640px; display:block; }}
   margin-top:10px; background:#12122a;
   border:1px solid #3949ab; border-radius:6px;
   padding:8px 12px; font-size:11px; color:#90caf9;
-  line-height:1.7;
+  line-height:1.7; text-align:center;
 }}
 #rules-box strong {{ color:#ffd54f; }}
 </style>
@@ -215,13 +201,11 @@ svg {{ width:100%; max-width:640px; display:block; }}
 <div id="map-container">
   <div id="map-title">
     🧬 {seq_info['name']} &nbsp;|&nbsp; {seq_len:,} bp (circular)
-    &nbsp;|&nbsp; Click any amplicon for full details
+    &nbsp;|&nbsp; Click any amplicon arc for full details
     &nbsp;|&nbsp; <span style="color:#ffd54f">ESC</span> to close panel
   </div>
-  <div id="svg-wrap">
-    <svg id="vec-svg" viewBox="0 0 800 800"
-         preserveAspectRatio="xMidYMid meet"></svg>
-  </div>
+  <svg id="vec-svg" viewBox="0 0 620 620"
+       preserveAspectRatio="xMidYMid meet"></svg>
 
   <div id="legend">
     <div class="legend-item"><div class="legend-dot" style="background:#2e7d32"></div>Done</div>
@@ -229,8 +213,9 @@ svg {{ width:100%; max-width:640px; display:block; }}
     <div class="legend-item"><div class="legend-dot" style="background:#b71c1c"></div>Failed</div>
     <div class="legend-item"><div class="legend-dot" style="background:#6a1b9a"></div>Overlap Violation</div>
     <div class="legend-item"><div class="legend-dot" style="background:#ffd54f;height:8px;border-radius:2px"></div>Overlap region</div>
-    <div class="legend-item"><div class="legend-dot" style="background:white;height:8px;border-radius:8px;opacity:.6"></div>FP end</div>
-    <div class="legend-item"><div class="legend-dot" style="background:#ff8a80;height:8px;border-radius:8px;opacity:.8"></div>RP end</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#00e5ff;height:8px;border-radius:2px"></div>Closure overlap (last ↔ first)</div>
+    <div class="legend-item">▶ FP (forward, clockwise)</div>
+    <div class="legend-item">◀ RP (reverse, counter-clockwise)</div>
   </div>
 
   <div id="rules-box">
@@ -256,139 +241,151 @@ svg {{ width:100%; max-width:640px; display:block; }}
 </div>
 
 <script>
-const SEQ_LEN = {seq_len};
-const AMPS    = {amp_json};
+const SEQ_LEN  = {seq_len};
+const AMPS     = {amp_json};
 
-const CX = 400, CY = 400;
-const RING_A_OUTER = 300, RING_A_INNER = 260;   // even-index amplicons
-const RING_B_OUTER = 248, RING_B_INNER = 208;   // odd-index amplicons
-const BACKBONE_R   = 322;
-const TICK_OUT_R   = 334;
-const TICK_LABEL_R = 348;
-const LEADER_END_R = 360;
-const LABEL_TEXT_R = 372;
+// ── Circular layout geometry ──────────────────────────────────────────────
+const CX = 310, CY = 310;
+const R_BACKBONE  = 170;
+const R_TICK_OUT  = 179;
+const R_TICK_LBL  = 191;
+const R_OVERLAP   = 200;        // highlight ring for consecutive overlaps
+const OV_THICK    = 8;
+const R_CLOSURE   = 200;        // same ring, distinct color, for last↔first
+const CLOSURE_THICK = 10;
+const CLOSURE_COLOR = '#00e5ff';
+const R_AMP = [220, 252];       // two alternating rings so labels don't collide
+const AMP_THICK   = 24;
+const MIN_ARC_DEG = 2;          // minimum visible arc span (prevents invisible slivers)
 
-function bp2angle(bp) {{ return (bp / SEQ_LEN) * 360.0; }}
-
-function polar(r, angleDeg) {{
-  const rad = angleDeg * Math.PI / 180;
-  return {{ x: CX + r * Math.sin(rad), y: CY - r * Math.cos(rad) }};
+function angleOf(bp) {{
+  // 0 bp -> top of circle (-90deg), increases clockwise
+  return (-Math.PI/2) + (bp / SEQ_LEN) * 2 * Math.PI;
 }}
-
+function pt(r, angleRad) {{
+  return {{ x: CX + r*Math.cos(angleRad), y: CY + r*Math.sin(angleRad) }};
+}}
 function mkEl(tag, attrs) {{
   const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
-  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  for (const [k,v] of Object.entries(attrs)) el.setAttribute(k,v);
   return el;
 }}
-
-function ringFor(idx) {{
-  return (idx % 2 === 0)
-    ? {{ outer: RING_A_OUTER, inner: RING_A_INNER }}
-    : {{ outer: RING_B_OUTER, inner: RING_B_INNER }};
+function arcPath(r, startBp, endBp) {{
+  let a0 = angleOf(startBp), a1 = angleOf(endBp);
+  if (a1 <= a0) a1 += 2*Math.PI; // guard against zero/negative spans
+  const spanDeg = (a1 - a0) * 180/Math.PI;
+  if (spanDeg < MIN_ARC_DEG) a1 = a0 + (MIN_ARC_DEG * Math.PI/180);
+  const p0 = pt(r, a0), p1 = pt(r, a1);
+  const largeArc = (a1 - a0) > Math.PI ? 1 : 0;
+  return `M ${{p0.x}} ${{p0.y}} A ${{r}} ${{r}} 0 ${{largeArc}} 1 ${{p1.x}} ${{p1.y}}`;
 }}
-
-// Donut-segment path from angle a1 -> a2 (degrees, a2 > a1), radii rOuter/rInner
-function arcPath(a1, a2, rOuter, rInner) {{
-  const span = a2 - a1;
-  const largeArc = span > 180 ? 1 : 0;
-  const p1 = polar(rOuter, a1), p2 = polar(rOuter, a2);
-  const p3 = polar(rInner, a2), p4 = polar(rInner, a1);
-  return `M ${{p1.x}} ${{p1.y}} A ${{rOuter}} ${{rOuter}} 0 ${{largeArc}} 1 ${{p2.x}} ${{p2.y}} `
-       + `L ${{p3.x}} ${{p3.y}} A ${{rInner}} ${{rInner}} 0 ${{largeArc}} 0 ${{p4.x}} ${{p4.y}} Z`;
+function tangentDeg(angleRad) {{
+  return (angleRad + Math.PI/2) * 180/Math.PI;
+}}
+function drawArrow(svg, r, bp, angleRad, pointsForward, color, opacity) {{
+  const p = pt(r, angleRad);
+  let deg = tangentDeg(angleRad);
+  if (!pointsForward) deg += 180;
+  const tri = mkEl('polygon', {{
+    points: '0,-6 11,0 0,6',
+    fill: color, opacity: opacity, 'pointer-events':'none',
+    transform: `translate(${{p.x}},${{p.y}}) rotate(${{deg}})`
+  }});
+  svg.appendChild(tri);
+}}
+function placeLabel(svg, r, angleRad, text, color) {{
+  let deg = tangentDeg(angleRad);
+  const norm = ((deg % 360) + 360) % 360;
+  if (norm > 90 && norm < 270) deg += 180; // flip so text never renders upside-down
+  const p = pt(r, angleRad);
+  const t = mkEl('text', {{
+    x:0, y:0, 'text-anchor':'middle', 'dominant-baseline':'middle',
+    fill:color, 'font-size':10, 'font-weight':'bold', 'pointer-events':'none',
+    transform:`translate(${{p.x}},${{p.y}}) rotate(${{deg}})`
+  }});
+  t.textContent = text;
+  svg.appendChild(t);
 }}
 
 function drawMap() {{
   const svg = document.getElementById('vec-svg');
   svg.innerHTML = '';
 
-  // Backbone circle
+  // Backbone ring
   svg.appendChild(mkEl('circle', {{
-    cx: CX, cy: CY, r: BACKBONE_R, fill: 'none',
-    stroke: '#4a4a6a', 'stroke-width': 2
+    cx:CX, cy:CY, r:R_BACKBONE, fill:'none',
+    stroke:'#4a4a6a', 'stroke-width':3
   }}));
 
-  // Position ticks every 10% + start marker
-  for (let i = 0; i < 10; i++) {{
-    const bp = Math.round((i / 10) * SEQ_LEN);
-    const ang = bp2angle(bp);
-    const p1  = polar(BACKBONE_R, ang);
-    const p2  = polar(TICK_OUT_R, ang);
+  // Ticks + position labels (every 10%)
+  for (let i=0; i<10; i++) {{
+    const bp = Math.round((i/10)*SEQ_LEN);
+    const a  = angleOf(bp);
+    const p0 = pt(R_BACKBONE-4, a), p1 = pt(R_TICK_OUT, a);
     svg.appendChild(mkEl('line', {{
-      x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y,
-      stroke: '#6a6a8a', 'stroke-width': 1
+      x1:p0.x, y1:p0.y, x2:p1.x, y2:p1.y, stroke:'#6a6a8a', 'stroke-width':1
     }}));
-    const pt = polar(TICK_LABEL_R, ang);
+    const lp = pt(R_TICK_LBL, a);
     const t = mkEl('text', {{
-      x: pt.x, y: pt.y, 'text-anchor': 'middle',
-      'dominant-baseline': 'middle', fill: '#8888aa', 'font-size': 9
+      x:lp.x, y:lp.y, 'text-anchor':'middle', 'dominant-baseline':'middle',
+      fill:'#8888aa', 'font-size':9
     }});
-    t.textContent = bp >= 1000 ? (bp / 1000).toFixed(1) + 'k' : bp;
+    t.textContent = bp>=1000 ? (bp/1000).toFixed(1)+'k' : bp;
     svg.appendChild(t);
   }}
-  // Base-1 marker at top
-  const top = polar(BACKBONE_R - 6, 0);
-  const tTop = mkEl('text', {{
-    x: top.x, y: top.y - 8, 'text-anchor': 'middle', fill: '#ffd54f', 'font-size': 9, 'font-weight': 'bold'
-  }});
-  tTop.textContent = '1 bp';
-  svg.appendChild(tTop);
+  // Origin marker (base 1)
+  const originPt = pt(R_BACKBONE, angleOf(0));
+  svg.appendChild(mkEl('circle', {{cx:originPt.x, cy:originPt.y, r:3.5, fill:'#ffd54f'}}));
 
-  // Overlap highlights (span full band, both rings, at the junction angle range)
-  for (let i = 0; i < AMPS.length - 1; i++) {{
-    const cur = AMPS[i], nxt = AMPS[i + 1];
-    const ov = cur.end - nxt.start;
-    if (ov > 0) {{
-      const a1 = bp2angle(nxt.start), a2 = bp2angle(cur.end);
-      const path = arcPath(a1, a2, RING_A_OUTER, RING_B_INNER);
-      svg.appendChild(mkEl('path', {{
-        d: path, fill: '#ffd54f', opacity: 0.18
-      }}));
+  // Overlap highlight arcs (between consecutive amplicons)
+  for (let i=0; i<AMPS.length-1; i++) {{
+    const cur=AMPS[i], nxt=AMPS[i+1];
+    if (cur.end > nxt.start) {{
+      const path = mkEl('path', {{
+        d: arcPath(R_OVERLAP, nxt.start, cur.end),
+        fill:'none', stroke:'#ffd54f', 'stroke-width':OV_THICK, opacity:0.35
+      }});
+      svg.appendChild(path);
     }}
   }}
 
-  // Amplicon arcs
-  AMPS.forEach((amp) => {{
-    const ring = ringFor(amp.idx);
-    let a1 = bp2angle(amp.start), a2 = bp2angle(amp.end);
-    if (a2 <= a1) a2 += 0.5; // guard against zero-width arcs
-
+  // Closure overlap arc — where the circular vector joins back on itself,
+  // i.e. between the LAST amplicon and the FIRST amplicon, drawn distinctly
+  // from the regular (yellow) consecutive-overlap arcs above.
+  if (AMPS.length > 1) {{
+    const first = AMPS[0], last = AMPS[AMPS.length - 1];
+    // Junction where the vector closes: last amplicon's end meets the
+    // first amplicon's start (both sit at/near position 0 on the circle).
     const path = mkEl('path', {{
-      d: arcPath(a1, a2, ring.outer, ring.inner),
-      fill: amp.status_color, opacity: 0.82,
-      stroke: 'white', 'stroke-width': 0.7, cursor: 'pointer'
+      d: arcPath(R_CLOSURE, last.end, first.start),
+      fill:'none', stroke:CLOSURE_COLOR, 'stroke-width':CLOSURE_THICK,
+      opacity:0.65, 'stroke-linecap':'round'
     }});
-    path.addEventListener('mouseenter', () => path.setAttribute('opacity', '1'));
-    path.addEventListener('mouseleave', () => path.setAttribute('opacity', '0.82'));
-    path.addEventListener('click', e => showDetail(amp.idx, e));
+    svg.appendChild(path);
+  }}
+
+  // Amplicon arcs (outer, alternating rings)
+  AMPS.forEach((amp, idx) => {{
+    const r = R_AMP[idx % 2];
+    const path = mkEl('path', {{
+      d: arcPath(r, amp.start, amp.end),
+      fill:'none', stroke:amp.status_color, 'stroke-width':AMP_THICK,
+      'stroke-linecap':'butt', opacity:0.82, cursor:'pointer'
+    }});
+    path.addEventListener('mouseenter', ()=>path.setAttribute('opacity','1'));
+    path.addEventListener('mouseleave', ()=>path.setAttribute('opacity','0.82'));
+    path.addEventListener('click', e=>showDetail(idx, e));
     svg.appendChild(path);
 
-    // FP marker (white dot, start of arc) / RP marker (red dot, end of arc)
-    const midR = (ring.outer + ring.inner) / 2;
-    const fpP = polar(midR, a1), rpP = polar(midR, a2);
-    svg.appendChild(mkEl('circle', {{
-      cx: fpP.x, cy: fpP.y, r: 4, fill: 'white', opacity: 0.75, 'pointer-events': 'none'
-    }}));
-    svg.appendChild(mkEl('circle', {{
-      cx: rpP.x, cy: rpP.y, r: 4, fill: '#ff8a80', opacity: 0.85, 'pointer-events': 'none'
-    }}));
+    // FP / RP direction arrows at the arc ends
+    drawArrow(svg, r, amp.start, angleOf(amp.start), true,  'white',   0.55);
+    drawArrow(svg, r, amp.end,   angleOf(amp.end),   false, '#ff8a80', 0.65);
 
-    // Leader line + outside label
-    const midAngle = (a1 + a2) / 2;
-    const leaderStart = polar(ring.outer, midAngle);
-    const leaderEnd   = polar(LEADER_END_R, midAngle);
-    svg.appendChild(mkEl('line', {{
-      x1: leaderStart.x, y1: leaderStart.y, x2: leaderEnd.x, y2: leaderEnd.y,
-      stroke: amp.color, 'stroke-width': 1, opacity: 0.8, 'pointer-events': 'none'
-    }}));
-    const labelPt = polar(LABEL_TEXT_R, midAngle);
-    const anchor = labelPt.x >= CX - 1 ? 'start' : 'end';
-    const label = mkEl('text', {{
-      x: labelPt.x, y: labelPt.y, 'text-anchor': anchor,
-      'dominant-baseline': 'middle', fill: '#e0e0e0', 'font-size': 10,
-      'font-weight': 'bold', 'pointer-events': 'none'
-    }});
-    label.textContent = `A${{amp.num}}`;
-    svg.appendChild(label);
+    // Label
+    const spanDeg = ((amp.end - amp.start) / SEQ_LEN) * 360;
+    if (spanDeg > 5) {{
+      placeLabel(svg, r, angleOf((amp.start+amp.end)/2), `A${{amp.num}}`, '#ffffff');
+    }}
   }});
 }}
 
@@ -474,11 +471,11 @@ function showDetail(idx, evt) {{
     <div class="overlap-box">
       <div class="section-title" style="margin-top:0">⬌ Overlap Coverage</div>
       <div class="overlap-row">
-        <span style="color:#90caf9">⬆ Upstream (with Amp ${{amp.num - 1}})</span>
+        <span style="color:#90caf9">⬆ Upstream (with Amp ${{amp.num-1}})</span>
         <span class="ov-val">${{prevOv}}${{prevWarn}}</span>
       </div>
       <div class="overlap-row">
-        <span style="color:#90caf9">⬇ Downstream (with Amp ${{amp.num + 1}})</span>
+        <span style="color:#90caf9">⬇ Downstream (with Amp ${{amp.num+1}})</span>
         <span class="ov-val">${{nextOv}}${{nextWarn}}</span>
       </div>
     </div>

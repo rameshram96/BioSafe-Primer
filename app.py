@@ -1,3 +1,4 @@
+
 import streamlit as st
 import os, sys, json
 import pandas as pd
@@ -11,6 +12,8 @@ from modules.primer_design   import (design_all_primers, redesign_primers,
                                       MIN_PRIMER_LEN, MAX_PRIMER_LEN,
                                       MAX_REDESIGN_VERSIONS)
 from modules.vector_map      import build_interactive_map
+from modules.genbank_export import build_annotated_genbank_bytes
+
 from modules.project_file    import (new_project, save_project_bytes,
                                       load_project_bytes,
                                       encode_gel_image, decode_gel_image,
@@ -23,7 +26,6 @@ from modules.project_file    import (new_project, save_project_bytes,
                                       update_amplicon_name, add_pcr_run,
                                       add_redesign_history, assign_ids,
                                       get_project_stats)
-
 st.set_page_config(page_title="BioSafe Primer", page_icon="🧬",
                    layout="wide", initial_sidebar_state="collapsed")
 
@@ -561,7 +563,7 @@ with tab2:
     best = get_best_primers(proj())
     if not best: st.info("No primers designed yet.")
     else:
-        st.components.v1.html(build_interactive_map(si, best), height=440, scrolling=True)
+        st.components.v1.html(build_interactive_map(si, best), height=760, scrolling=True)
         st.caption("💡 Click any amplicon for details | ESC to close | Show Sequence → Ctrl+F | "
                    "🔁 cyan highlight near position 0 = circular overlap with the last amplicon")
 
@@ -760,7 +762,7 @@ with tab5:
 
     st.markdown("---")
     st.markdown("#### 📊 Result Files")
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
         if st.button("📊 Generate Full Excel (long format)", type="primary"):
             buf = primers_to_excel_bytes(all_primers, pname)
@@ -787,10 +789,14 @@ with tab5:
             st.download_button("⬇️ Download PDF", data=buf,
                 file_name=f"{pname}_report.pdf", mime="application/pdf", key="dl_pdf")
 
-    st.caption("**Full Excel** = every field currently tracked (long format). "
-               "**Summary Excel** = Amplicon No, Amplicon Name, FP/RP sequence, GC%, Tm, "
-               "amplicon length, overlap_prev, overlap_next (short format). "
-               "**Order CSV** = one row per primer — Primer Name, Sequence, Number of Bases.")
+    with c5:
+        if st.button("🧬 Generate GenBank (.gb)"):
+            best = get_best_primers(proj())
+            gb_bytes = build_annotated_genbank_bytes(si, best, pname, circular=True)
+            st.download_button("⬇️ Download .gb", data=gb_bytes,
+            file_name=f"{pname}_annotated.gb", mime="chemical/seq-na-genbank",
+            key="dl_genbank")
+            st.caption ("The .gb file opens directly in SnapGene, ApE, or Benchling — amplicons and primers are pre-colored and labeled.")
 
     history = proj().get('redesign_history',[])
     if history:
@@ -800,5 +806,4 @@ with tab5:
         show_h = ['amplicon_num','failure_type','attempt_num','extension_left','extension_right',
                   'upstream_overlap_result','downstream_overlap_result','reason','redesign_date']
         st.dataframe(df[[c for c in show_h if c in df.columns]], use_container_width=True)
-
 footer()
