@@ -541,3 +541,116 @@ def save_interactive_map(seq_info, primers, output_path):
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(html)
     return output_path
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Static circular map (matplotlib PNG) — for embedding in the PDF report.
+# Mirrors the styling of the interactive map: alternating amplicon bands,
+# colored arcs, base-1 marker, tick marks, leader-line labels.
+# ══════════════════════════════════════════════════════════════════════════
+def build_static_circular_map_png(seq_info, primers, dpi=150):
+    """
+    Render a static circular vector map as a PNG (matplotlib), for
+    embedding in the PDF report. `primers` should be the deduped/"best"
+    list (one entry per amplicon), non-failed only.
+    Returns a BytesIO containing PNG bytes.
+    """
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Polygon
+    from io import BytesIO
+
+    seq_len = seq_info['length']
+
+    def bp2angle(bp):
+        return (bp / seq_len) * 360.0 if seq_len else 0.0
+
+    def arc_points(a1, a2, r_outer, r_inner, n=48):
+        pts = []
+        for i in range(n + 1):
+            a = a1 + (a2 - a1) * i / n
+            pts.append(_polar(r_outer, a))
+        for i in range(n + 1):
+            a = a2 - (a2 - a1) * i / n
+            pts.append(_polar(r_inner, a))
+        return pts
+
+    fig, ax = plt.subplots(figsize=(8, 8), dpi=dpi)
+    ax.set_xlim(0, 800)
+    ax.set_ylim(0, 800)
+    ax.set_aspect('equal')
+    ax.axis('off')
+    ax.invert_yaxis()  # match the clockwise-from-top convention of _polar()
+
+    # Backbone circle
+    theta = list(range(0, 361, 2))
+    bx = [CX + BACKBONE_R * math.sin(math.radians(t)) for t in theta]
+    by = [CY - BACKBONE_R * math.cos(math.radians(t)) for t in theta]
+    ax.plot(bx, by, color='#37474f', linewidth=1.2, zorder=1)
+
+    # Position ticks every 10% of the vector
+    for i in range(10):
+        bp  = round((i / 10) * seq_len)
+        ang = bp2angle(bp)
+        p1  = _polar(BACKBONE_R, ang)
+        p2  = _polar(TICK_OUT_R, ang)
+        ax.plot([p1[0], p2[0]], [p1[1], p2[1]], color='#607d8b', linewidth=1, zorder=1)
+        pt  = _polar(TICK_LABEL_R, ang)
+        lbl = f"{bp/1000:.1f}k" if bp >= 1000 else str(bp)
+        ax.text(pt[0], pt[1], lbl, ha='center', va='center', fontsize=7, color='#455a64')
+
+    # Base-1 marker at top
+    top = _polar(BACKBONE_R - 6, 0)
+    ax.text(top[0], top[1] - 10, '1 bp', ha='center', va='center',
+             fontsize=8, color='#b8860b', fontweight='bold')
+
+    # Overlap highlights between consecutive amplicons
+    for i in range(len(primers) - 1):
+        cur, nxt = primers[i], primers[i + 1]
+        ov = cur['amplicon_end'] - nxt['amplicon_start']
+        if ov > 0:
+            a1 = bp2angle(nxt['amplicon_start'])
+            a2 = bp2angle(cur['amplicon_end'])
+            poly = Polygon(arc_points(a1, a2, RING_A_OUTER, RING_B_INNER),
+                            closed=True, facecolor='#ffd54f', alpha=0.25,
+                            edgecolor='none', zorder=2)
+            ax.add_patch(poly)
+
+    # Amplicon arcs, alternating bands + leader-line labels
+    for i, p in enumerate(primers):
+        ring_outer, ring_inner = (
+            (RING_A_OUTER, RING_A_INNER) if i % 2 == 0
+            else (RING_B_OUTER, RING_B_INNER)
+        )
+        a1 = bp2angle(p['amplicon_start'])
+        a2 = bp2angle(p['amplicon_end'])
+        if a2 <= a1:
+            a2 += 0.5
+        color = AMP_PALETTE[i % len(AMP_PALETTE)]
+
+        poly = Polygon(arc_points(a1, a2, ring_outer, ring_inner), closed=True,
+                        facecolor=color, edgecolor='white', linewidth=0.8,
+                        alpha=0.9, zorder=3)
+        ax.add_patch(poly)
+
+        mid_angle    = (a1 + a2) / 2
+        leader_start = _polar(ring_outer, mid_angle)
+        leader_end   = _polar(LEADER_END_R, mid_angle)
+        ax.plot([leader_start[0], leader_end[0]], [leader_start[1], leader_end[1]],
+                color=color, linewidth=1, alpha=0.85, zorder=2)
+
+        label_pt = _polar(LABEL_TEXT_R, mid_angle)
+        ha = 'left' if label_pt[0] >= CX - 1 else 'right'
+        name = p.get('amplicon_name') or f"Amplicon_{p['amplicon_num']}"
+        ax.text(label_pt[0], label_pt[1], name, ha=ha, va='center',
+                fontsize=7.5, fontweight='bold', color='#263238', zorder=4)
+
+    ax.text(CX, 38, f"{seq_info.get('name', 'Vector')}  ({seq_len:,} bp, circular)",
+            ha='center', va='center', fontsize=11, fontweight='bold', color='#1A237E')
+
+    buf = BytesIO()
+    fig.savefig(buf, format='png', bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    buf.seek(0)
+    return buf

@@ -524,12 +524,12 @@ with tab1:
                     'pair_penalty','amplicon_length','overlap_prev','overlap_next','status']
             st.dataframe(df[[c for c in show if c in df.columns]], use_container_width=True)
 
-    # ── Post-design downloads: order sheet + long/short result files ─────────
+    # ── Post-design downloads: order sheet + long/short result files + GenBank ─
     latest_batch = st.session_state.get('last_designed')
     if latest_batch:
         st.markdown("---")
         st.markdown("**📥 Download this design run**")
-        dc1, dc2, dc3 = st.columns(3)
+        dc1, dc2, dc3, dc4 = st.columns(4)
         with dc1:
             st.download_button(
                 "🧾 Order Primers (CSV)",
@@ -553,6 +553,14 @@ with tab1:
                 file_name=f"{pname}_primers_summary.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="dl_short_tab1"
+            )
+        with dc4:
+            st.download_button(
+                "🧬 GenBank (.gb)",
+                data=build_annotated_genbank_bytes(si, latest_batch, pname, circular=True),
+                file_name=f"{pname}_annotated.gb", mime="chemical/seq-na-genbank",
+                key="dl_genbank_tab1",
+                help="Amplicon + primer annotations only — opens in SnapGene, ApE, or Benchling."
             )
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -702,11 +710,25 @@ with tab4:
             g_gel  = st.file_uploader("Gel image", type=['png','jpg','jpeg','tif'])
             g_note = st.text_area("Notes", placeholder="Band size, anomalies…")
 
+        st.markdown("---")
+        st.markdown("##### 🏷️ Lanes in this gel image")
+        st.caption("Describe every lane visible in the uploaded image (e.g. sample names, "
+                   "ladder, negative control). This is purely descriptive — the run above "
+                   "still records a single overall Pass/Fail result for the gel.")
+        g_num_lanes = st.number_input("Total lanes in this gel image", 1, 15, 1, key="g_num_lanes")
+        lane_labels = []
+        lane_cols = st.columns(3)
+        for i in range(int(g_num_lanes)):
+            with lane_cols[i % 3]:
+                lbl = st.text_input(f"Lane {i+1} label", value=f"Lane {i+1}", key=f"g_lane_lbl_{i}")
+            lane_labels.append(lbl)
+
         if st.button("💾 Save Run", type="primary"):
             gel_b64 = encode_gel_image(g_gel.read()) if g_gel else None
             g_rs    = "Pass" if "Pass" in g_result else "Fail"
             add_pcr_run(proj(), g_p['_id'], g_rs, gel_b64, g_lane, g_note,
-                        g_p['amplicon_num'], g_p['fp_sequence'], g_p['rp_sequence'])
+                        g_p['amplicon_num'], g_p['fp_sequence'], g_p['rp_sequence'],
+                        lane_labels=lane_labels)
             update_primer_status(proj(), g_p['_id'], "Success" if g_rs=="Pass" else "Failed")
             st.success("✅ Run saved! Remember to 💾 Save Project."); st.rerun()
 
@@ -730,6 +752,13 @@ with tab4:
                     with rc1:
                         st.write(f"**Lane:** {run.get('lane_number','—')}")
                         st.write(f"**Notes:** {run.get('notes','—')}")
+                        run_lane_labels = run.get('lane_labels') or []
+                        if run_lane_labels:
+                            st.write(f"**Lanes in this gel ({len(run_lane_labels)}):**")
+                            st.markdown(
+                                "".join(f"&nbsp;&nbsp;`{i+1}.` {l}<br>" for i, l in enumerate(run_lane_labels)),
+                                unsafe_allow_html=True
+                            )
                         st.markdown(f'<div class="primer-code">FP: {run.get("fp_sequence","—")}</div>', unsafe_allow_html=True)
                         st.markdown(f'<div class="primer-code rp">RP: {run.get("rp_sequence","—")}</div>', unsafe_allow_html=True)
                     with rc2:
@@ -785,7 +814,7 @@ with tab5:
                 key="dl_order_csv")
     with c4:
         if st.button("📄 Generate PDF Report"):
-            buf = primers_to_pdf_bytes(pname, all_primers, pcr_runs)
+            buf = primers_to_pdf_bytes(pname, all_primers, pcr_runs, seq_info=si)
             st.download_button("⬇️ Download PDF", data=buf,
                 file_name=f"{pname}_report.pdf", mime="application/pdf", key="dl_pdf")
 

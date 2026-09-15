@@ -9,6 +9,8 @@ from datetime import datetime
 from io import BytesIO, StringIO
 from collections import defaultdict
 
+from .vector_map import build_static_circular_map_png
+
 BSP_VERSION = "1.0"
 
 
@@ -58,6 +60,18 @@ def get_best_primers(state):
     return sorted(seen.values(), key=lambda x: x["amplicon_num"])
 
 
+def _dedupe_best(primers):
+    """Same dedup logic as get_best_primers() but operating on a raw list
+    of primer dicts instead of a project state — used when we only have
+    an already-extracted list (e.g. inside the PDF export)."""
+    seen = {}
+    for p in primers:
+        an = p["amplicon_num"]
+        if an not in seen or p.get("version", 1) > seen[an].get("version", 1):
+            seen[an] = p
+    return sorted(seen.values(), key=lambda x: x["amplicon_num"])
+
+
 def add_primers(state, primers):
     state["primers"].extend(primers)
 
@@ -82,7 +96,15 @@ def update_amplicon_name(state, primer_id, new_name):
 
 
 def add_pcr_run(state, primer_id, result, gel_b64, lane_number,
-                notes, amplicon_num, fp_sequence, rp_sequence):
+                notes, amplicon_num, fp_sequence, rp_sequence,
+                lane_labels=None):
+    """
+    lane_labels: optional list of strings — one label per lane visible in
+    this gel image (up to 15). Purely descriptive metadata about the gel
+    layout (e.g. sample names, ladder, controls); the run still carries a
+    single overall `result` (Pass/Fail) and a single `lane_number`
+    identifying which lane corresponds to `primer_id`.
+    """
     state["pcr_runs"].append({
         "id":            len(state["pcr_runs"]) + 1,
         "primer_id":     primer_id,
@@ -92,6 +114,7 @@ def add_pcr_run(state, primer_id, result, gel_b64, lane_number,
         "result":        result,
         "gel_image_b64": gel_b64,
         "lane_number":   lane_number,
+        "lane_labels":   lane_labels or [],
         "notes":         notes,
         "run_date":      datetime.now().strftime("%Y-%m-%d %H:%M"),
     })
@@ -292,7 +315,12 @@ def primers_to_order_csv_bytes(primers):
     return buf
 
 
-def primers_to_pdf_bytes(project_name, primers, pcr_runs):
+def primers_to_pdf_bytes(project_name, primers, pcr_runs, seq_info=None):
+    """
+    seq_info: optional dict with 'name', 'sequence', 'length' — when
+    provided, a static circular vector map (amplicons + primers,
+    matplotlib-rendered) is embedded near the top of the report.
+    """
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors
     from reportlab.lib.units import cm
@@ -317,6 +345,21 @@ def primers_to_pdf_bytes(project_name, primers, pcr_runs):
     story.append(Paragraph(
         "BioSafe Primer | Division of Plant Physiology, ICAR-IARI", body_s))
     story.append(Spacer(1,0.3*cm))
+
+    # ── Circular vector map (amplicons + primers) ────────────────────────────
+    if seq_info:
+        best_for_map = _dedupe_best(
+            [p for p in primers if p.get('fp_sequence') != 'DESIGN_FAILED']
+        )
+        if best_for_map:
+            story.append(Paragraph("Circular Vector Map — Amplicons & Primers", sec_s))
+            try:
+                map_buf = build_static_circular_map_png(seq_info, best_for_map)
+                story.append(RLImage(map_buf, width=16*cm, height=16*cm))
+            except Exception:
+                pass
+            story.append(Spacer(1, 0.3*cm))
+
     story.append(PageBreak())
 
     story.append(Paragraph("Primer Design Summary", sec_s))
@@ -362,10 +405,13 @@ def primers_to_pdf_bytes(project_name, primers, pcr_runs):
     if pcr_runs:
         story.append(PageBreak())
         story.append(Paragraph("PCR Run Log", sec_s))
-        rhead = [['Run Date','Amplicon #','Result','Lane','Notes']]
+        rhead = [['Run Date','Amplicon #','Result','Lane','Lanes in Gel','Notes']]
         for r in pcr_runs:
+            lane_labels = r.get('lane_labels') or []
+            lanes_str   = "; ".join(f"{i+1}:{lbl}" for i, lbl in enumerate(lane_labels)) if lane_labels else "—"
             rhead.append([r.get('run_date',''),str(r.get('amplicon_num','')),
-                          r.get('result',''),str(r.get('lane_number','')),r.get('notes','')])
+                          r.get('result',''),str(r.get('lane_number','')),
+                          lanes_str, r.get('notes','')])
         rt = Table(rhead, repeatRows=1)
         rt.setStyle(TableStyle([
             ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#283593')),
@@ -399,8 +445,11 @@ def primers_to_pdf_bytes(project_name, primers, pcr_runs):
                         img_el = RLImage(img_buf, width=7*cm, height=5*cm)
                     except Exception:
                         continue  # skip invalid/corrupt image
+                    lane_labels = r.get('lane_labels') or []
+                    lanes_note  = (" | Lanes: " + ", ".join(lane_labels)) if lane_labels else ""
                     cap       = Paragraph(
-                        f"<b>{rl}</b> Lane {r.get('lane_number','')} {r.get('run_date','')}",
+                        f"<b>{rl}</b> Lane {r.get('lane_number','')} {r.get('run_date','')}"
+                        f"<font size=6>{lanes_note}</font>",
                         ParagraphStyle('gc',parent=body_s,fontSize=7,
                                        textColor=rc,alignment=TA_CENTER))
                     gel_row.append([img_el, cap])

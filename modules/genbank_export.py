@@ -3,9 +3,8 @@ genbank_export.py — BioSafe Primer
 Builds a GenBank (.gb) file annotated with amplicon and primer features,
 readable in SnapGene, ApE, Benchling, etc.
 
-Feature layout:
-  source        — whole sequence, organism = synthetic construct
-  (original)    — any features carried over from the uploaded GenBank file
+Feature layout (amplicon/primer annotations ONLY — no source feature and
+no features carried over from the originally uploaded file):
   misc_feature  — one per amplicon, colored by status
   primer_bind   — one per FP (forward strand) and RP (reverse strand)
 """
@@ -44,8 +43,9 @@ def _amp_label(p):
 
 def build_annotated_genbank(seq_info, primers, project_name, circular=True):
     """
-    Build a GenBank file (as a string) annotating amplicons and primers
-    on top of the vector sequence (plus any original features).
+    Build a GenBank file (as a string) annotating ONLY amplicons and
+    primers on top of the vector sequence (no source feature, no
+    original/carried-over features).
 
     seq_info: dict with 'name', 'sequence', 'features' (as produced by
               sequence_parser.parse_sequence or reconstructed from a
@@ -72,23 +72,10 @@ def build_annotated_genbank(seq_info, primers, project_name, circular=True):
 
     features = []
 
-    # Whole-sequence source feature (standard GenBank convention)
-    features.append(SeqFeature(
-        FeatureLocation(0, seq_len, strand=1),
-        type='source',
-        qualifiers={'organism': ['synthetic construct'], 'mol_type': ['other DNA']}
-    ))
-
-    # Carry over original annotations (genes, promoters, etc.)
-    for f in seq_info.get('features', []) or []:
-        strand = f.get('strand') or 1
-        start  = max(0, min(f['start'], seq_len))
-        end    = max(start + 1, min(f['end'], seq_len))
-        features.append(SeqFeature(
-            FeatureLocation(start, end, strand=strand),
-            type=f.get('type', 'misc_feature'),
-            qualifiers={'label': [f.get('label', f.get('type', 'feature'))]}
-        ))
+    # NOTE: by design this export contains ONLY amplicon and primer
+    # annotations — no whole-sequence 'source' feature and no features
+    # carried over from the originally uploaded file. Amplicon/primer
+    # features still carry their full notes (Tm, GC%, penalty, etc.).
 
     # Amplicons + primers
     for p in primers:
