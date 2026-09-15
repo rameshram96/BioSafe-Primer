@@ -320,6 +320,13 @@ def primers_to_pdf_bytes(project_name, primers, pcr_runs, seq_info=None):
     seq_info: optional dict with 'name', 'sequence', 'length' — when
     provided, a static circular vector map (amplicons + primers,
     matplotlib-rendered) is embedded near the top of the report.
+
+    NOTE ON TABLE COLUMNS: the primer summary table intentionally omits
+    Hairpin Tm, 3' End Stability, and Penalty for both FP and RP, and
+    omits Pair Penalty — these are secondary Primer3 diagnostics that
+    are still available in the full Excel export (primers_to_excel_bytes)
+    and in the on-screen amplicon details, just not in this printed
+    summary table.
     """
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors
@@ -362,13 +369,16 @@ def primers_to_pdf_bytes(project_name, primers, pcr_runs, seq_info=None):
 
     story.append(PageBreak())
 
+    # ── Primer summary table ──────────────────────────────────────────────────
+    # Columns kept: Amp#, Name, Ver, Status, FP sequence/Len/Tm/GC%,
+    # RP sequence/Len/Tm/GC%, Amp Len, Overlap Up/Down.
+    # Columns dropped (per request): FP/RP Hairpin, FP/RP 3'Stab,
+    # FP/RP Penalty, Pair Penalty.
     story.append(Paragraph("Primer Design Summary", sec_s))
     thead = [['Amp#','Name','Ver','Status',
               'Forward Primer','FP\nLen','FP\nTm','FP\nGC%',
-              'FP\nHairpin',"FP\n3'Stab",'FP\nPenalty',
               'Reverse Primer','RP\nLen','RP\nTm','RP\nGC%',
-              'RP\nHairpin',"RP\n3'Stab",'RP\nPenalty',
-              'Pair\nPenalty','Amp\nLen','Overlap\nUp','Overlap\nDown']]
+              'Amp\nLen','Overlap\nUp','Overlap\nDown']]
     for p in primers:
         prev_ov = p.get('overlap_prev')
         next_ov = p.get('overlap_next')
@@ -377,11 +387,7 @@ def primers_to_pdf_bytes(project_name, primers, pcr_runs, seq_info=None):
             p.get('amplicon_name',f"Amplicon_{p['amplicon_num']}"),
             str(p.get('version',1)), p.get('status','Pending'),
             p['fp_sequence'],str(p['fp_length']),f"{p['fp_tm']}°C",f"{p['fp_gc']}%",
-            f"{p.get('fp_hairpin_tm',0)}°C",f"{p.get('fp_end_stability',0)}",
-            str(p.get('fp_penalty',0)),
             p['rp_sequence'],str(p['rp_length']),f"{p['rp_tm']}°C",f"{p['rp_gc']}%",
-            f"{p.get('rp_hairpin_tm',0)}°C",f"{p.get('rp_end_stability',0)}",
-            str(p.get('rp_penalty',0)),str(p.get('pair_penalty',0)),
             str(p['amplicon_length']),
             str(prev_ov) if prev_ov is not None else 'N/A',
             str(next_ov) if next_ov is not None else 'N/A',
@@ -391,14 +397,14 @@ def primers_to_pdf_bytes(project_name, primers, pcr_runs, seq_info=None):
         ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#1A237E')),
         ('TEXTCOLOR',(0,0),(-1,0),colors.white),
         ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),
-        ('FONTSIZE',(0,0),(-1,-1),5.5),
+        ('FONTSIZE',(0,0),(-1,-1),7),
         ('ALIGN',(0,0),(-1,-1),'CENTER'),
         ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
         ('ROWBACKGROUNDS',(0,1),(-1,-1),
          [colors.HexColor('#F5F5FF'),colors.HexColor('#E8EAF6')]),
         ('GRID',(0,0),(-1,-1),0.4,colors.HexColor('#9FA8DA')),
         ('FONTNAME',(4,1),(4,-1),'Courier'),
-        ('FONTNAME',(11,1),(11,-1),'Courier'),
+        ('FONTNAME',(8,1),(8,-1),'Courier'),
     ]))
     story.append(t)
 

@@ -120,6 +120,23 @@ def status_badge(s):
     return f'<span class="status-badge" style="background:{c}">{s}</span>'
 
 
+def _primer_summary_df(primers):
+    """Build the standard results dataframe used after a design run and
+    when displaying already-saved primers for a reopened project."""
+    df = pd.DataFrame(primers)
+    if df.empty:
+        return df
+    if 'amplicon_name' not in df.columns:
+        df['amplicon_name'] = df['amplicon_num'].apply(lambda n: f'Amplicon_{n}')
+    df['overlap_prev'] = df['overlap_prev'].apply(fmt_ov)
+    df['overlap_next'] = df['overlap_next'].apply(fmt_ov)
+    show = ['amplicon_num','amplicon_name','fp_sequence','fp_tm','fp_gc',
+            'fp_hairpin_tm','fp_end_stability','fp_penalty','rp_sequence',
+            'rp_tm','rp_gc','rp_hairpin_tm','rp_end_stability','rp_penalty',
+            'pair_penalty','amplicon_length','overlap_prev','overlap_next','status']
+    return df[[c for c in show if c in df.columns]]
+
+
 # ── Parameter confirmation panel ─────────────────────────────────────────────
 def _param_confirm_panel(max_amp, min_over, opt_tm, min_tm, max_tm):
     """Returns True if user confirms, False otherwise."""
@@ -467,7 +484,10 @@ with tab1:
         'make the last amplicon overlap Amplicon 1 across the origin, in addition to all '
         'the normal consecutive overlaps.</div>', unsafe_allow_html=True)
     existing = get_best_primers(proj())
-    if existing: st.info(f"ℹ️ {len(existing)} amplicons already designed.")
+    if existing:
+        st.info(f"ℹ️ {len(existing)} amplicons already designed for this project.")
+        with st.expander("📋 View currently saved primers", expanded=True):
+            st.dataframe(_primer_summary_df(existing), use_container_width=True)
 
     # ── Parameter confirmation flow ───────────────────────────────────────────
     if 'confirm_pending' not in st.session_state:
@@ -475,6 +495,27 @@ with tab1:
             st.session_state['confirm_pending'] = True
             st.rerun()
     else:
+        discard_old = False
+        if existing:
+            st.markdown("""
+<div class="param-confirm">
+  <h4>⚠️ This project already has designed primers</h4>
+</div>""", unsafe_allow_html=True)
+            keep_choice = st.radio(
+                "What should happen to the existing primer set?",
+                ["➕ Keep old set — add this run as a new/additional set",
+                 "🗑️ Discard old set — replace it with this new design"],
+                key="design_keep_choice"
+            )
+            discard_old = keep_choice.startswith("🗑️")
+            if discard_old:
+                st.warning("⚠️ The existing saved primers (and their statuses/history) will be "
+                           "**removed** and replaced once you confirm below.")
+            else:
+                st.info("ℹ️ The existing primers will be kept. This new design run will be "
+                        "added alongside them — the Progress Tracker and Export use only the "
+                        "**latest version per amplicon number**, so review both sets afterwards.")
+
         confirmed = _param_confirm_panel(max_amp, min_over, opt_tm, min_tm, max_tm)
         if confirmed:
             params = {'PRIMER_OPT_SIZE':20,'PRIMER_MIN_SIZE':18,'PRIMER_MAX_SIZE':25,
@@ -485,15 +526,23 @@ with tab1:
                       'PRIMER_PAIR_MAX_COMPL_ANY':12,'PRIMER_PAIR_MAX_COMPL_END':8}
             with st.spinner("Designing primers with Primer3 (circular closure included)…"):
                 primers, violations = design_all_primers(proj()['vector_sequence'], max_amp, min_over, params)
-            assign_ids(primers)
-            offset = len(proj()['primers'])
-            for p in primers: p['_id'] += offset
+
+            if discard_old:
+                proj()['primers'] = []
+                assign_ids(primers)
+            else:
+                assign_ids(primers)
+                offset = len(proj()['primers'])
+                for p in primers: p['_id'] += offset
+
             add_primers(proj(), primers)
             st.session_state.pop('confirm_pending', None)
+            st.session_state.pop('design_keep_choice', None)
             st.session_state['last_designed'] = primers
 
             failed = sum(1 for p in primers if p['fp_sequence']=='DESIGN_FAILED')
-            st.success(f"✅ Designed **{len(primers)}** primer pairs  |  ⚠️ {failed} failed")
+            action_word = "Replaced with" if discard_old else "Added"
+            st.success(f"✅ {action_word} **{len(primers)}** primer pairs  |  ⚠️ {failed} failed")
 
             last_valid = next((p for p in reversed(primers) if p['fp_sequence'] != 'DESIGN_FAILED'), None)
             if last_valid:
@@ -513,16 +562,7 @@ with tab1:
             for v in ot_v: st.warning(v)
             if not violations: st.success("✅ All protocol rules passed")
 
-            df = pd.DataFrame(primers)
-            if 'amplicon_name' not in df.columns:
-                df['amplicon_name'] = df['amplicon_num'].apply(lambda n: f'Amplicon_{n}')
-            df['overlap_prev'] = df['overlap_prev'].apply(fmt_ov)
-            df['overlap_next'] = df['overlap_next'].apply(fmt_ov)
-            show = ['amplicon_num','amplicon_name','fp_sequence','fp_tm','fp_gc',
-                    'fp_hairpin_tm','fp_end_stability','fp_penalty','rp_sequence',
-                    'rp_tm','rp_gc','rp_hairpin_tm','rp_end_stability','rp_penalty',
-                    'pair_penalty','amplicon_length','overlap_prev','overlap_next','status']
-            st.dataframe(df[[c for c in show if c in df.columns]], use_container_width=True)
+            st.dataframe(_primer_summary_df(primers), use_container_width=True)
 
     # ── Post-design downloads: order sheet + long/short result files + GenBank ─
     latest_batch = st.session_state.get('last_designed')

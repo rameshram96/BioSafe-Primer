@@ -576,9 +576,39 @@ def build_static_circular_map_png(seq_info, primers, dpi=150):
             pts.append(_polar(r_inner, a))
         return pts
 
-    fig, ax = plt.subplots(figsize=(8, 8), dpi=dpi)
-    ax.set_xlim(0, 800)
-    ax.set_ylim(0, 800)
+    n_amps = len(primers)
+
+    # ── Anti-overlap label layout ────────────────────────────────────────────
+    # With many amplicons packed around the circle, fixed-radius horizontal
+    # labels collide with their neighbours. Two independent measures fix
+    # this: (1) stagger the label radius per amplicon (near/far, matching
+    # the existing near/far arc-ring alternation) so adjacent labels are
+    # not competing for the same horizontal band, and (2) shrink font size
+    # as amplicon count grows, since angular spacing per label shrinks too.
+    label_r_near  = LABEL_TEXT_R
+    label_r_far   = LABEL_TEXT_R + 34
+    leader_r_near = LEADER_END_R
+    leader_r_far  = LEADER_END_R + 26
+
+    if n_amps <= 8:
+        label_fontsize = 8.5
+    elif n_amps <= 14:
+        label_fontsize = 7.0
+    elif n_amps <= 22:
+        label_fontsize = 5.8
+    else:
+        label_fontsize = 4.8
+
+    # Canvas needs extra room for the staggered "far" label ring plus the
+    # widest label text; expand the plotted bounds symmetrically instead of
+    # keeping the tight 0-800 box the interactive (screen) map uses.
+    PAD = 60
+    XLIM = (0 - PAD, 800 + PAD)
+    YLIM = (0 - PAD, 800 + PAD)
+
+    fig, ax = plt.subplots(figsize=(9, 9), dpi=dpi)
+    ax.set_xlim(*XLIM)
+    ax.set_ylim(*YLIM)
     ax.set_aspect('equal')
     ax.axis('off')
     ax.invert_yaxis()  # match the clockwise-from-top convention of _polar()
@@ -634,19 +664,30 @@ def build_static_circular_map_png(seq_info, primers, dpi=150):
                         alpha=0.9, zorder=3)
         ax.add_patch(poly)
 
-        mid_angle    = (a1 + a2) / 2
+        mid_angle = (a1 + a2) / 2
+
+        # Stagger both the leader length and label radius by parity so
+        # neighbouring amplicon labels sit on two different concentric
+        # "reading rings" instead of piling onto one, which is what caused
+        # overlapping text for vectors with several amplicons.
+        leader_r = leader_r_near if i % 2 == 0 else leader_r_far
+        label_r  = label_r_near  if i % 2 == 0 else label_r_far
+
         leader_start = _polar(ring_outer, mid_angle)
-        leader_end   = _polar(LEADER_END_R, mid_angle)
-        ax.plot([leader_start[0], leader_end[0]], [leader_start[1], leader_end[1]],
+        leader_mid   = _polar(leader_r, mid_angle)
+        ax.plot([leader_start[0], leader_mid[0]], [leader_start[1], leader_mid[1]],
                 color=color, linewidth=1, alpha=0.85, zorder=2)
 
-        label_pt = _polar(LABEL_TEXT_R, mid_angle)
+        label_pt = _polar(label_r, mid_angle)
         ha = 'left' if label_pt[0] >= CX - 1 else 'right'
         name = p.get('amplicon_name') or f"Amplicon_{p['amplicon_num']}"
         ax.text(label_pt[0], label_pt[1], name, ha=ha, va='center',
-                fontsize=7.5, fontweight='bold', color='#263238', zorder=4)
+                fontsize=label_fontsize, fontweight='bold', color='#263238',
+                zorder=4,
+                bbox=dict(boxstyle='round,pad=0.15', facecolor='white',
+                          edgecolor='none', alpha=0.72))
 
-    ax.text(CX, 38, f"{seq_info.get('name', 'Vector')}  ({seq_len:,} bp, circular)",
+    ax.text(CX, 20, f"{seq_info.get('name', 'Vector')}  ({seq_len:,} bp, circular)",
             ha='center', va='center', fontsize=11, fontweight='bold', color='#1A237E')
 
     buf = BytesIO()
