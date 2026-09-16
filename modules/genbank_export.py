@@ -7,23 +7,6 @@ Feature layout (amplicon/primer annotations ONLY — no source feature and
 no features carried over from the originally uploaded file):
   misc_feature  — one per amplicon, colored by status
   primer_bind   — one per FP (forward strand) and RP (reverse strand)
-
-CIRCULAR-ORIGIN FIX: primer_design.py stores the origin-spanning ("wrap")
-amplicon using "extended" (monotonic) coordinates — amplicon_end can be
-> seq_len so that amplicon_length == amplicon_end - amplicon_start stays
-simple everywhere. Any code that writes real sequence coordinates (this
-module) MUST convert those extended coordinates back to real circular
-coordinates via primer_design.split_origin_span() before building a
-Bio.SeqFeature location. Previously this module didn't do that — it just
-clipped the extended end down to seq_len, which silently:
-  - truncated the amplicon's misc_feature so it no longer visibly spanned
-    the origin, and
-  - placed the reverse primer's primer_bind feature at the physical TAIL
-    of the vector sequence (seq_len - rp_length .. seq_len) instead of
-    where it actually binds, near the origin (0 .. circular_overlap) —
-    i.e. at a position where that primer's sequence isn't actually
-    present. This module now builds a two-segment CompoundLocation
-    (join-style) for any amplicon/FP/RP feature that crosses the origin.
 """
 import io
 import re
@@ -33,8 +16,6 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from Bio.SeqFeature import SeqFeature, FeatureLocation, CompoundLocation
 from Bio import SeqIO
-
-from .primer_design import split_origin_span
 
 AMPLICON_STATUS_COLORS = {
     'Pending':           '#e65100',
@@ -60,29 +41,32 @@ def _amp_label(p):
     return p.get('amplicon_name') or f"Amplicon_{p['amplicon_num']}"
 
 
-def _build_location(start, end, seq_len, strand):
+def _real_spans(start, end, seq_len):
     """
-    Build a Bio.SeqFeature location for a (possibly origin-spanning) span.
+    Convert an 'extended' (possibly > seq_len, monotonic) coordinate span
+    into one or two REAL 0-based half-open spans on the circular vector.
 
-    `start`/`end` may be given in "extended" coordinates (end > seq_len
-    for a span that wraps past the origin) — this always converts via
-    split_origin_span() first, so callers never need to pre-clip.
-
-    Returns a single FeatureLocation for a normal (non-wrapping) span, or
-    a CompoundLocation (join of two segments, in increasing genomic
-    order) when the span crosses the origin — the standard way to
-    represent an origin-spanning feature on a circular sequence.
+    Handles all three cases that show up for the origin-spanning amplicon
+    and its reverse primer:
+      - span entirely before the origin            -> unchanged, 1 span
+      - span straddles the origin (start<seq_len<end) -> 2 spans (the
+        case `split_origin_span()` in primer_design.py already covered)
+      - span ENTIRELY past the origin (start>=seq_len) -> both ends need
+        seq_len subtracted; this is the case that was missing and is
+        exactly what produces a mis-sized/mis-placed reverse primer,
+        because the RP of the wrap amplicon usually sits *fully* inside
+        the wrapped pad near base 1, not straddling it.
     """
-    spans = split_origin_span(start, end, seq_len)
-    parts = [FeatureLocation(s, e, strand=strand) for s, e in spans if e > s]
-    if not parts:
-        # Degenerate/zero-length — fall back to a minimal 1 bp feature
-        # rather than raising, so one bad primer doesn't break the export.
-        safe_start = max(0, min(start, seq_len - 1))
-        return FeatureLocation(safe_start, safe_start + 1, strand=strand)
-    if len(parts) == 1:
-        return parts[0]
-    return CompoundLocation(parts, operator='join')
+    if start >= seq_len:
+        return [(start - seq_len, end - seq_len)]
+    if end <= seq_len:
+        return [(start, end)]
+    return [(start, seq_len), (0, end - seq_len)]
+
+
+def _location_from_spans(spans, strand):
+    locs = [FeatureLocation(s, e, strand=strand) for s, e in spans]
+    return locs[0] if len(locs) == 1 else CompoundLocation(locs)
 
 
 def build_annotated_genbank(seq_info, primers, project_name, circular=True):
@@ -129,27 +113,32 @@ def build_annotated_genbank(seq_info, primers, project_name, circular=True):
         name    = _amp_label(p)
         status  = p.get('status', 'Pending')
         color   = AMPLICON_STATUS_COLORS.get(status, '#78909c')
-        wraps   = bool(p.get('wraps_origin'))
 
-        # Amplicon extent, in EXTENDED coordinates as stored by
-        # primer_design.py (amplicon_end may exceed seq_len for the
-        # wrap amplicon) — _build_location() converts these to real
-        # circular coordinates (splitting across the origin if needed).
-        a_start_ext = max(0, p['amplicon_start'])
-        a_end_ext   = max(a_start_ext + 1, p['amplicon_end'])
+        # 'amplicon_start'/'amplicon_end' are EXTENDED (monotonic) coords —
+        # amplicon_end can exceed seq_len for the amplicon that wraps the
+        # plasmid origin. Always convert to real spans before building any
+        # GenBank location; never clamp-and-truncate (that silently drops
+        # the wrapped portion and mis-anchors anything measured from it,
+        # which is what was producing the bad reverse-primer location/size).
+        raw_start = max(0, p['amplicon_start'])
+        raw_end   = max(raw_start + 1, p['amplicon_end'])
+
+        amp_spans = _real_spans(raw_start, raw_end, seq_len)
+        amp_loc   = _location_from_spans(amp_spans, strand=1)
 
         prev_ov = p.get('overlap_prev')
         next_ov = p.get('overlap_next')
         amp_note = (
             f"Status: {status}; Version: {p.get('version', 1)}; "
-            f"Length: {p.get('amplicon_length', a_end_ext - a_start_ext)} bp; "
+            f"Length: {p.get('amplicon_length', raw_end - raw_start)} bp; "
             f"Overlap upstream: {prev_ov if prev_ov is not None else 'N/A'} bp; "
             f"Overlap downstream: {next_ov if next_ov is not None else 'N/A'} bp; "
             f"Pair penalty: {p.get('pair_penalty', 0)}"
-            + ("; spans plasmid origin" if wraps else "")
+            + (" (wraps plasmid origin — location is a join() across base 1)"
+               if len(amp_spans) > 1 else "")
         )
         features.append(SeqFeature(
-            _build_location(a_start_ext, a_end_ext, seq_len, strand=1),
+            amp_loc,
             type='misc_feature',
             qualifiers={
                 'label':             [name],
@@ -160,16 +149,15 @@ def build_annotated_genbank(seq_info, primers, project_name, circular=True):
         ))
 
         # Forward primer — binds top strand, at amplicon start.
-        # The FP always sits on the "tail" side of a wrap amplicon (i.e.
-        # at a real, non-extended coordinate < seq_len), so this normally
-        # never needs splitting — but _build_location() handles it safely
-        # either way.
-        fp_len      = p.get('fp_length', 0)
-        fp_start    = a_start_ext
-        fp_end_ext  = fp_start + fp_len
-        if fp_end_ext > fp_start:
+        # FP always sits within the pre-origin part of the amplicon, so it
+        # is always in real (< seq_len) coordinates already — no wrap
+        # handling needed here.
+        fp_len   = p.get('fp_length', 0)
+        fp_start = raw_start
+        fp_end   = min(seq_len, fp_start + fp_len)
+        if fp_end > fp_start:
             features.append(SeqFeature(
-                _build_location(fp_start, fp_end_ext, seq_len, strand=1),
+                FeatureLocation(fp_start, fp_end, strand=1),
                 type='primer_bind',
                 qualifiers={
                     'label': [f'{name}_FP'],
@@ -184,16 +172,25 @@ def build_annotated_genbank(seq_info, primers, project_name, circular=True):
             ))
 
         # Reverse primer — binds bottom strand, at amplicon end.
-        # For the wrap amplicon this end is in EXTENDED coordinates (past
-        # seq_len), so the RP itself can straddle the origin — this is
-        # exactly the case that was previously mis-placed at the tail of
-        # the sequence. _build_location() now splits it correctly.
-        rp_len       = p.get('rp_length', 0)
-        rp_end_ext   = a_end_ext
-        rp_start_ext = max(0, rp_end_ext - rp_len)
-        if rp_end_ext > rp_start_ext:
+        # THIS is the fix: previously rp_end was taken from the amplicon's
+        # CLAMPED end (min(amplicon_end, seq_len)), which for the wrap
+        # amplicon anchors the RP at the physical end of the vector — a
+        # location that has nothing to do with where the primer actually
+        # binds (the wrap pad taken from near base 1). Worse, because
+        # rp_start was then computed as rp_end - rp_len from that wrong
+        # anchor, the feature could visually swallow most of the
+        # already-truncated amplicon block, reading as an oversized RP.
+        # Fix: compute RP's real (start, end) directly from the amplicon's
+        # own EXTENDED end, then convert THAT to real spans — same rule
+        # used for the amplicon block itself.
+        rp_len        = p.get('rp_length', 0)
+        rp_raw_end    = raw_end
+        rp_raw_start  = raw_end - rp_len
+        if rp_raw_end > rp_raw_start:
+            rp_spans = _real_spans(rp_raw_start, rp_raw_end, seq_len)
+            rp_loc   = _location_from_spans(rp_spans, strand=-1)
             features.append(SeqFeature(
-                _build_location(rp_start_ext, rp_end_ext, seq_len, strand=-1),
+                rp_loc,
                 type='primer_bind',
                 qualifiers={
                     'label': [f'{name}_RP'],
@@ -201,7 +198,7 @@ def build_annotated_genbank(seq_info, primers, project_name, circular=True):
                         f"Sequence: {p.get('rp_sequence','')}; "
                         f"Tm={p.get('rp_tm',0)}°C; GC={p.get('rp_gc',0)}%; "
                         f"Len={rp_len}bp; Penalty={p.get('rp_penalty',0)}"
-                        + ("; binds across plasmid origin" if wraps else "")
+                        + (" (wraps plasmid origin)" if len(rp_spans) > 1 else "")
                     ],
                     'ApEinfo_fwdcolor': [RP_COLOR],
                     'ApEinfo_revcolor': [RP_COLOR],

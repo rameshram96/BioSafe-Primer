@@ -31,65 +31,108 @@ st.set_page_config(page_title="BioSafe Primer", page_icon="🧬",
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Source+Code+Pro:wght@400;600&display=swap');
-html,body,[class*="css"]{font-family:'Source Sans 3','Segoe UI',Arial,sans-serif !important;color:#1C1C1E;}
-.stApp{background:#F7F5F2;}
-[data-testid="stSidebar"]{background:#FFF;border-right:2px solid #D0D7E3;}
-[data-testid="stSidebar"] *{color:#1C1C1E !important;}
-.main-header{background:#0072B2;border-radius:10px;padding:20px 28px;margin-bottom:20px;
-  box-shadow:0 3px 14px rgba(0,114,178,.22);display:flex;align-items:center;justify-content:space-between;}
-.main-header h1{color:#FFF;font-size:1.8rem;font-weight:700;margin:0;}
-.main-header p{color:#CDEAF8;font-size:.9rem;margin:4px 0 0;}
-.active-proj-badge{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.4);
-  border-radius:20px;padding:5px 14px;color:white;font-size:.85rem;font-weight:600;white-space:nowrap;}
-.home-box{background:#FFF;border:2px dashed #A8BACA;border-radius:12px;padding:28px 32px;margin-bottom:18px;}
-.home-box h3{color:#0072B2;margin:0 0 14px;font-size:1.05rem;font-weight:700;}
-.proj-banner{background:#EEF2F7;border:1.5px solid #C3CFE0;border-radius:8px;
-  padding:10px 16px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;}
-.proj-banner .pname{font-weight:700;color:#0072B2;font-size:1rem;}
-.proj-banner .pmeta{color:#5A6475;font-size:12px;}
-.metric-card{background:#FFF;border:2px solid #D0D7E3;border-radius:10px;
-  padding:14px 16px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.06);}
-.metric-card .value{font-size:1.9rem;font-weight:700;color:#0072B2;}
-.metric-card .label{font-size:.72rem;color:#5A6475;text-transform:uppercase;letter-spacing:.8px;margin-top:4px;}
-.metric-done .value{color:#009E73;} .metric-pending .value{color:#E69F00;} .metric-failed .value{color:#D55E00;}
-.section-header{border-left:4px solid #0072B2;padding-left:12px;color:#0072B2;
-  font-size:1.1rem;font-weight:600;margin:20px 0 12px;}
-.upload-done{background:#E8F5E9;border:1.5px solid #009E73;border-radius:8px;
-  padding:12px 16px;color:#1B4332;font-size:13px;margin-bottom:10px;}
-.circ-note{background:#E3F2FD;border:1.5px solid #0072B2;border-radius:8px;
-  padding:10px 16px;color:#0D47A1;font-size:12.5px;margin-bottom:10px;}
-.param-confirm{background:#FFF;border:2px solid #0072B2;border-radius:10px;
-  padding:16px 20px;margin:12px 0;}
-.param-confirm h4{color:#0072B2;margin:0 0 10px;font-size:1rem;font-weight:700;}
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root{
+  --ink-900:#171A21; --ink-700:#3A404B; --ink-400:#7B8494;
+  --line-200:#E1E4EA; --line-100:#EDEFF3;
+  --surface-0:#FFFFFF; --surface-50:#F6F7F9;
+  --accent:#2E5FE8; --accent-tint:#EAF0FE; --accent-dark:#1F49C4;
+  --success:#1F8A5F; --success-tint:#E7F5EE;
+  --warning:#B4790F; --warning-tint:#FCF3E3;
+  --danger:#B3392C;  --danger-tint:#FBEAE7;
+  --violet:#6A4FA0;  --violet-tint:#F1ECFA;
+  --neutral:#5B6472; --neutral-tint:#EEF0F3;
+}
+
+html,body,[class*="css"]{font-family:'IBM Plex Sans','Segoe UI',Arial,sans-serif !important;color:var(--ink-900);}
+.stApp{background:var(--surface-50);}
+[data-testid="stSidebar"]{background:var(--surface-0);border-right:1px solid var(--line-200);}
+[data-testid="stSidebar"] *{color:var(--ink-900) !important;}
+
+/* ── Header: slim flat bar, not a filled color block ── */
+.main-header{background:var(--surface-0);border:1px solid var(--line-200);border-bottom:2px solid var(--ink-900);
+  border-radius:10px;padding:14px 20px;margin-bottom:14px;
+  display:flex;align-items:center;justify-content:space-between;}
+.main-header h1{color:var(--ink-900);font-size:1.35rem;font-weight:700;margin:0;letter-spacing:-.01em;}
+.main-header p{color:var(--ink-400);font-size:.82rem;margin:2px 0 0;}
+.active-proj-badge{background:var(--accent-tint);border:1px solid var(--accent);
+  border-radius:8px;padding:5px 14px;color:var(--accent-dark);font-size:.82rem;font-weight:600;white-space:nowrap;}
+
+/* ── Project hub cards ── */
+.home-box{background:var(--surface-0);border:1px solid var(--line-200);border-radius:10px;
+  padding:20px 24px;margin-bottom:16px;}
+.home-box h3{color:var(--ink-900);margin:0 0 14px;font-size:1rem;font-weight:700;}
+
+/* ── Slim project status strip ── */
+.proj-banner{background:var(--surface-0);border:1px solid var(--line-200);border-radius:8px;
+  padding:8px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;}
+.proj-banner .pname{font-weight:700;color:var(--ink-900);font-size:.92rem;}
+.proj-banner .pmeta{color:var(--ink-400);font-size:11.5px;}
+
+/* ── Metric tiles: flat, bordered, no drop-shadow ── */
+.metric-card{background:var(--surface-0);border:1px solid var(--line-200);border-radius:8px;
+  padding:12px 14px;text-align:center;}
+.metric-card .value{font-size:1.7rem;font-weight:700;color:var(--accent);line-height:1.1;}
+.metric-card .label{font-size:.74rem;color:var(--ink-400);margin-top:4px;}
+.metric-done .value{color:var(--success);} .metric-pending .value{color:var(--warning);} .metric-failed .value{color:var(--danger);}
+
+.section-header{border-left:3px solid var(--accent);padding-left:10px;color:var(--ink-900);
+  font-size:1.02rem;font-weight:700;margin:18px 0 10px;}
+
+/* ── Notes/callouts: left-accent-bar strips, not solid-filled boxes ── */
+.upload-done{background:var(--success-tint);border-left:3px solid var(--success);border-radius:6px;
+  padding:9px 14px;color:var(--ink-900);font-size:13px;margin-bottom:10px;}
+.circ-note{background:var(--accent-tint);border-left:3px solid var(--accent);border-radius:6px;
+  padding:9px 14px;color:var(--ink-900);font-size:12.5px;margin-bottom:10px;}
+.param-confirm{background:var(--surface-0);border:1px solid var(--line-200);border-left:3px solid var(--accent);
+  border-radius:8px;padding:14px 18px;margin:10px 0;}
+.param-confirm h4{color:var(--ink-900);margin:0;font-size:.95rem;font-weight:700;}
 .param-row{display:flex;justify-content:space-between;padding:4px 0;
-  border-bottom:1px solid #EEF2F7;font-size:13px;}
-.param-label{color:#5A6475;font-weight:500;}
-.param-value{color:#1C1C1E;font-weight:600;}
-.compact-row{background:#FFF;border:1px solid #D0D7E3;border-radius:8px;
+  border-bottom:1px solid var(--line-100);font-size:13px;}
+.param-label{color:var(--ink-400);font-weight:500;}
+.param-value{color:var(--ink-900);font-weight:600;}
+.compact-row{background:var(--surface-0);border:1px solid var(--line-200);border-radius:8px;
   padding:10px 14px;margin-bottom:6px;display:flex;align-items:center;gap:12px;}
-.primer-code{font-family:'Source Code Pro','Courier New',monospace !important;background:#EEF2F7;
-  border-radius:6px;padding:6px 10px;font-size:12.5px;color:#1C1C1E;margin:4px 0;border-left:3px solid #0072B2;}
-.primer-code.rp{border-left-color:#D55E00;}
-.ov-badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600;}
-.ov-ok{background:#D4EDDA;color:#155724;border:1px solid #009E73;}
-.ov-fail{background:#FDECEA;color:#721C24;border:1px solid #D55E00;}
-.ov-na{background:#EEF2F7;color:#5A6475;border:1px solid #C3CFE0;}
-.circ-badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600;
-  background:#E1F5FE;color:#01579B;border:1px solid #0288D1;}
-.status-badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;color:white;}
-.redesign-preview{background:#FFF8EC;border:2px solid #E69F00;border-radius:10px;padding:16px 20px;margin-top:12px;}
-.redesign-preview h4{color:#7A4F00;margin:0 0 10px;font-size:1rem;font-weight:700;}
-.split-warning{background:#FFF3CD;border:2px solid #E69F00;border-radius:8px;padding:10px 14px;margin-bottom:10px;}
-.rule-pass{color:#009E73;font-weight:600;} .rule-fail{color:#D55E00;font-weight:600;}
-.stTabs [data-baseweb="tab"]{color:#5A6475 !important;font-weight:500;font-size:.92rem;}
-.stTabs [aria-selected="true"]{color:#0072B2 !important;border-bottom:3px solid #0072B2 !important;font-weight:700;}
-.stButton>button{border-radius:7px;font-weight:600;font-family:'Source Sans 3',sans-serif !important;}
-.footer-ribbon{position:fixed;bottom:0;left:0;right:0;background:#0072B2;color:#CDEAF8;
+
+/* ── Primer sequence chips — monospace used only where functional ── */
+.primer-code{font-family:'IBM Plex Mono','Courier New',monospace !important;background:var(--surface-50);
+  border-radius:6px;padding:6px 10px;font-size:12.5px;color:var(--ink-900);margin:4px 0;border-left:3px solid var(--accent);}
+.primer-code.rp{border-left-color:var(--warning);}
+
+/* ── Badges: soft tint + colored text, not solid fill ── */
+.ov-badge{display:inline-block;padding:2px 10px;border-radius:999px;font-size:11.5px;font-weight:600;}
+.ov-ok{background:var(--success-tint);color:var(--success);}
+.ov-fail{background:var(--danger-tint);color:var(--danger);}
+.ov-na{background:var(--neutral-tint);color:var(--ink-400);}
+.circ-badge{display:inline-block;padding:2px 10px;border-radius:999px;font-size:11.5px;font-weight:600;
+  background:var(--accent-tint);color:var(--accent-dark);}
+.status-badge{display:inline-block;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;}
+
+.redesign-preview{background:var(--warning-tint);border-left:3px solid var(--warning);border-radius:8px;padding:14px 18px;margin-top:12px;}
+.redesign-preview h4{color:var(--ink-900);margin:0 0 10px;font-size:.95rem;font-weight:700;}
+.split-warning{background:var(--warning-tint);border-left:3px solid var(--warning);border-radius:6px;padding:9px 14px;margin-bottom:10px;}
+.rule-pass{color:var(--success);font-weight:600;} .rule-fail{color:var(--danger);font-weight:600;}
+
+/* ── Tabs: quiet inactive, accent underline on active ── */
+.stTabs [data-baseweb="tab-list"]{gap:4px;}
+.stTabs [data-baseweb="tab"]{color:var(--ink-400) !important;font-weight:500;font-size:.9rem;padding:8px 4px;}
+.stTabs [aria-selected="true"]{color:var(--ink-900) !important;border-bottom:2px solid var(--accent) !important;font-weight:700;}
+
+/* ── Buttons: flat, accent reserved for primary actions ── */
+.stButton>button, .stDownloadButton>button{border-radius:6px;font-weight:600;
+  font-family:'IBM Plex Sans',sans-serif !important;border:1px solid var(--line-200);}
+.stButton>button[kind="primary"], .stDownloadButton>button[kind="primary"]{
+  background:var(--accent);border-color:var(--accent);color:#fff;}
+.stButton>button[kind="primary"]:hover, .stDownloadButton>button[kind="primary"]:hover{
+  background:var(--accent-dark);border-color:var(--accent-dark);}
+
+/* ── Footer: slim line, no filled bar ── */
+.footer-ribbon{position:fixed;bottom:0;left:0;right:0;background:var(--surface-0);color:var(--ink-400);
   text-align:center;font-size:11.5px;font-weight:500;padding:7px 20px;z-index:9999;
-  box-shadow:0 -2px 8px rgba(0,114,178,.18);font-family:'Source Sans 3','Segoe UI',Arial,sans-serif;}
-.footer-ribbon strong{color:#FFF;}
-.block-container{padding-bottom:48px !important;}
+  border-top:1px solid var(--line-200);font-family:'IBM Plex Sans','Segoe UI',Arial,sans-serif;}
+.footer-ribbon strong{color:var(--ink-900);}
+.block-container{padding-bottom:44px !important;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -110,14 +153,18 @@ def rule_check(ok, label):
 def amp_label(p):  return p.get('amplicon_name') or f"Amplicon_{p['amplicon_num']}"
 def proj():        return st.session_state['project']
 
-STATUS_COLORS = {
-    'Pending':'#E69F00','Success':'#009E73','Failed':'#D55E00',
-    'Overlap Violation':'#6a1b9a','Design Failed':'#546e7a','Redesigned':'#0072B2'
+STATUS_TINTS = {
+    'Pending':           ('var(--warning-tint)', 'var(--warning)'),
+    'Success':           ('var(--success-tint)', 'var(--success)'),
+    'Failed':            ('var(--danger-tint)',  'var(--danger)'),
+    'Overlap Violation': ('var(--violet-tint)',  'var(--violet)'),
+    'Design Failed':     ('var(--neutral-tint)', 'var(--neutral)'),
+    'Redesigned':        ('var(--accent-tint)',  'var(--accent-dark)'),
 }
 
 def status_badge(s):
-    c = STATUS_COLORS.get(s, '#546e7a')
-    return f'<span class="status-badge" style="background:{c}">{s}</span>'
+    bg, fg = STATUS_TINTS.get(s, ('var(--neutral-tint)', 'var(--neutral)'))
+    return f'<span class="status-badge" style="background:{bg};color:{fg}">{s}</span>'
 
 
 def _primer_summary_df(primers):
@@ -216,11 +263,11 @@ amplicons (A and B) have been designed to cover the full region with no gap.
 
             lbl = f"Amp {amp_label(p)}{np.get('split_label','')} v{np['version']}"
             viol_list = np.get('redesign_violations', [])
-            viol_html = ('<div style="margin-top:8px;background:#FDECEA;border-radius:6px;padding:8px 10px;">'
-                         + "".join(f'<div style="font-size:11px;color:#D55E00">⚠ {v}</div>' for v in viol_list)
+            viol_html = ('<div style="margin-top:8px;background:var(--danger-tint);border-radius:6px;padding:8px 10px;">'
+                         + "".join(f'<div style="font-size:11px;color:var(--danger)">⚠ {v}</div>' for v in viol_list)
                          + '</div>') if viol_list else (
-                         '<div style="margin-top:8px;background:#D4EDDA;border-radius:6px;'
-                         'padding:7px 10px;font-size:11.5px;color:#155724">✅ All rules pass</div>')
+                         '<div style="margin-top:8px;background:var(--success-tint);border-radius:6px;'
+                         'padding:7px 10px;font-size:11.5px;color:var(--success)">✅ All rules pass</div>')
             rules_html = " | ".join([
                 rule_check(amp_ok,   f"Amp {np['amplicon_length']} bp"),
                 rule_check(fp_ok,    f"FP {np['fp_length']} bp"),
@@ -232,11 +279,11 @@ amplicons (A and B) have been designed to cover the full region with no gap.
   <h4>📋 {lbl}</h4>
   <div style="margin-bottom:8px">{rules_html}</div>
   <div class="primer-code">FP: {np['fp_sequence']}</div>
-  <div style="font-size:11px;color:#5A6475;margin:2px 0 7px 4px">
+  <div style="font-size:11px;color:var(--ink-400);margin:2px 0 7px 4px">
     {np['fp_length']} bp | Tm {np['fp_tm']}°C | GC {np['fp_gc']}% |
     Hairpin {np.get('fp_hairpin_tm',0)}°C | 3'Stab {np.get('fp_end_stability',0)} | Penalty {np.get('fp_penalty',0)}</div>
   <div class="primer-code rp">RP: {np['rp_sequence']}</div>
-  <div style="font-size:11px;color:#5A6475;margin:2px 0 7px 4px">
+  <div style="font-size:11px;color:var(--ink-400);margin:2px 0 7px 4px">
     {np['rp_length']} bp | Tm {np['rp_tm']}°C | GC {np['rp_gc']}% |
     Hairpin {np.get('rp_hairpin_tm',0)}°C | 3'Stab {np.get('rp_end_stability',0)} | Penalty {np.get('rp_penalty',0)}</div>
   <div style="font-size:12px;margin-bottom:8px">
@@ -244,10 +291,10 @@ amplicons (A and B) have been designed to cover the full region with no gap.
     <strong>Len:</strong> {np['amplicon_length']} bp |
     <strong>Pair Penalty:</strong> {np.get('pair_penalty',0)}</div>
   <div style="display:flex;gap:10px;align-items:center;margin-bottom:4px">
-    <span style="font-size:12px;font-weight:600;color:#3A4A5C">🔼 Upstream (Amp {np['amplicon_num']-1}):</span>
+    <span style="font-size:12px;font-weight:600;color:var(--ink-700)">🔼 Upstream (Amp {np['amplicon_num']-1}):</span>
     {ov_badge(prev_ov)}</div>
   <div style="display:flex;gap:10px;align-items:center">
-    <span style="font-size:12px;font-weight:600;color:#3A4A5C">🔽 Downstream (Amp {np['amplicon_num']+1}):</span>
+    <span style="font-size:12px;font-weight:600;color:var(--ink-700)">🔽 Downstream (Amp {np['amplicon_num']+1}):</span>
     {ov_badge(next_ov)}</div>
   {viol_html}
 </div>""", unsafe_allow_html=True)
@@ -334,6 +381,11 @@ amplicons (A and B) have been designed to cover the full region with no gap.
 
 # ── Header ────────────────────────────────────────────────────────────────────
 def render_header():
+    st.markdown(
+    '<div style="color:#0072B2;font-size:12.5px;font-weight:600;margin:-8px 0 10px 2px;">'
+    '⬅️ Click the arrow (top-left corner) to open PCR Parameters'
+    '</div>',
+    unsafe_allow_html=True)
     p = st.session_state.get('project')
     badge = (f'<div class="active-proj-badge">📂 {p["project_name"]} &nbsp;·&nbsp; {p["vector_length"]:,} bp</div>'
              if p else "")
@@ -341,6 +393,7 @@ def render_header():
   <div><h1>🧬 BioSafe Primer</h1>
   <p>Overlapping PCR primer design · Progress monitoring · GMO exemption workflow</p></div>
   {badge}</div>""", unsafe_allow_html=True)
+    
 
 render_header()
 
@@ -584,7 +637,8 @@ with tab1:
                 data=primers_to_excel_bytes(latest_batch, pname),
                 file_name=f"{pname}_primers_full.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="dl_long_tab1"
+                key="dl_long_tab1",
+                help="Complete result in excel format"
             )
         with dc3:
             st.download_button(
@@ -592,7 +646,8 @@ with tab1:
                 data=primers_to_summary_excel_bytes(latest_batch, pname),
                 file_name=f"{pname}_primers_summary.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="dl_short_tab1"
+                key="dl_short_tab1",
+                help="Summary result with primer sequence, amplicon length and overlap length"
             )
         with dc4:
             st.download_button(
@@ -642,8 +697,8 @@ with tab3:
                         f'{last["circular_overlap"]} bp overlap with Amplicon 1</span>',
                         unsafe_allow_html=True)
         else:
-            st.markdown(f'<span class="circ-badge" style="background:#FDECEA;color:#721C24;'
-                        f'border-color:#D55E00">🔁 Circular closure NOT satisfied — '
+            st.markdown(f'<span class="circ-badge" style="background:var(--danger-tint);color:var(--danger);'
+                        f'border-color:var(--danger)">🔁 Circular closure NOT satisfied — '
                         f'{last.get("circular_overlap",0)} bp (redesign Amplicon '
                         f'{last["amplicon_num"]})</span>', unsafe_allow_html=True)
 
