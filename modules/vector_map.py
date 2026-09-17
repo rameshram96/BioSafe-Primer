@@ -214,7 +214,7 @@ svg {{ width:100%; max-width:640px; display:block; }}
 
 <div id="map-container">
   <div id="map-title">
-    🧬 {seq_info['name']} &nbsp;|&nbsp; {seq_len:,} bp (circular)
+    🧬 {seq_info['name']} &nbsp;|&nbsp; {seq_len:,} bp
     &nbsp;|&nbsp; Click any amplicon for full details
     &nbsp;|&nbsp; <span style="color:#ffd54f">ESC</span> to close panel
   </div>
@@ -687,8 +687,9 @@ def build_static_circular_map_png(seq_info, primers, dpi=150):
                 bbox=dict(boxstyle='round,pad=0.15', facecolor='white',
                           edgecolor='none', alpha=0.72))
 
-    ax.text(CX, 20, f"{seq_info.get('name', 'Vector')}  ({seq_len:,} bp, circular)",
-            ha='center', va='center', fontsize=11, fontweight='bold', color='#1A237E')
+    ax.text(CX, CY, f"{seq_info.get('name', 'Vector')}\n{seq_len:,} bp\n(circular)",
+        ha='center', va='center', fontsize=13, fontweight='bold', color='#1A237E',
+        linespacing=1.6)
 
     buf = BytesIO()
     fig.savefig(buf, format='png', bbox_inches='tight', facecolor='white')
