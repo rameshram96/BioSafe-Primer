@@ -185,11 +185,16 @@ def _primer_summary_df(primers):
 
 
 # ── Parameter confirmation panel ─────────────────────────────────────────────
-def _param_confirm_panel(max_amp, min_over, opt_tm, min_tm, max_tm):
-    """Returns True if user confirms, False otherwise."""
+def _param_confirm_panel():
+    """
+    Renders the PCR-parameter sliders together with the confirm/cancel
+    buttons, all in one place — shown only when the user clicks
+    "🚀 Design Primers" (replaces the old always-visible sidebar).
+    Returns (confirmed: bool, params: dict).
+    """
     st.markdown("""
 <div class="param-confirm">
-  <h4>⚙️ Confirm Design Parameters Before Running</h4>
+  <h4>⚙️ Set & Confirm Design Parameters</h4>
 </div>""", unsafe_allow_html=True)
 
     st.markdown(
@@ -201,26 +206,39 @@ def _param_confirm_panel(max_amp, min_over, opt_tm, min_tm, max_tm):
     c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown("**Amplicon**")
-        st.markdown(f"Max size: **{max_amp} bp**")
-        st.markdown(f"Min size: **{MIN_AMPLICON} bp**")
-        st.markdown(f"Min overlap: **{min_over} bp**")
+        max_amp  = st.slider("Max amplicon size (bp)", 300, 500, 500, 50, key="p_max_amp")
+        min_over = st.slider("Min overlap (bp)",         50, 150,  50, 10, key="p_min_over")
+        st.caption(f"Min amplicon size fixed at {MIN_AMPLICON} bp")
     with c2:
         st.markdown("**Melting Temperature**")
-        st.markdown(f"Optimal Tm: **{opt_tm}°C**")
-        st.markdown(f"Min Tm: **{min_tm}°C**")
-        st.markdown(f"Max Tm: **{max_tm}°C**")
+        opt_tm = st.slider("Optimal Tm (°C)", 55.0, 65.0, 60.0, 0.5, key="p_opt_tm")
+        min_tm = st.slider("Min Tm (°C)",     50.0, 60.0, 58.0, 0.5, key="p_min_tm")
+        max_tm = st.slider("Max Tm (°C)",     60.0, 70.0, 62.0, 0.5, key="p_max_tm")
     with c3:
-        st.markdown("**Primer**")
+        st.markdown("**Primer (fixed)**")
         st.markdown(f"Length: **{MIN_PRIMER_LEN}–{MAX_PRIMER_LEN} bp**")
         st.markdown(f"GC%: **40–60%**")
         st.markdown(f"Amp 1 starts: **base 1**")
 
+    with st.expander("📋 Full protocol rules"):
+        st.markdown(
+            f"Amp: {MIN_AMPLICON}–{MAX_AMPLICON} bp  \n"
+            f"Primer: {MIN_PRIMER_LEN}–{MAX_PRIMER_LEN} bp  \nOverlap ≥ 50 bp  \n"
+            f"Amp 1 starts at base 1  \nFull vector coverage  \n"
+            f"🔁 Circular closure (last ↔ first)"
+        )
+
     ca, cb = st.columns([1, 3])
     confirmed = ca.button("✅ Confirm & Design", type="primary", key="confirm_design")
-    if cb.button("✏️ Adjust Parameters", key="adjust_params"):
+    if cb.button("✖️ Cancel", key="adjust_params"):
         st.session_state.pop('confirm_pending', None)
         st.rerun()
-    return confirmed
+
+    params = {
+        'max_amp': max_amp, 'min_over': min_over,
+        'opt_tm': opt_tm, 'min_tm': min_tm, 'max_tm': max_tm,
+    }
+    return confirmed, params
 
 
 # ── Redesign UI ───────────────────────────────────────────────────────────────
@@ -381,11 +399,6 @@ amplicons (A and B) have been designed to cover the full region with no gap.
 
 # ── Header ────────────────────────────────────────────────────────────────────
 def render_header():
-    st.markdown(
-    '<div style="color:#0072B2;font-size:12.5px;font-weight:600;margin:-8px 0 10px 2px;">'
-    '⬅️ Click the arrow (top-left corner) to open PCR Parameters'
-    '</div>',
-    unsafe_allow_html=True)
     p = st.session_state.get('project')
     badge = (f'<div class="active-proj-badge">📂 {p["project_name"]} &nbsp;·&nbsp; {p["vector_length"]:,} bp</div>'
              if p else "")
@@ -508,19 +521,6 @@ with bb:
     st.download_button("💾 Save Project (.bsp)", data=save_project_bytes(proj()),
         file_name=f"{pname}.bsp", mime="application/json", key="save_banner")
 
-with st.sidebar:
-    st.markdown("#### ⚙️ PCR Parameters")
-    max_amp  = st.slider("Max amplicon (bp)", 300, 500, 500, 50)
-    min_over = st.slider("Min overlap (bp)",   50, 150,  50, 10)
-    opt_tm   = st.slider("Optimal Tm (°C)",  55.0, 65.0, 60.0, 0.5)
-    min_tm   = st.slider("Min Tm (°C)",      50.0, 60.0, 58.0, 0.5)
-    max_tm   = st.slider("Max Tm (°C)",      60.0, 70.0, 62.0, 0.5)
-    st.markdown("---")
-    st.markdown(f"**Protocol Rules**  \nAmp: {MIN_AMPLICON}–{MAX_AMPLICON} bp  \n"
-                f"Primer: {MIN_PRIMER_LEN}–{MAX_PRIMER_LEN} bp  \nOverlap ≥ 50 bp  \n"
-                f"Amp 1 starts at base 1  \nFull vector coverage  \n"
-                f"🔁 Circular closure (last ↔ first)")
-
 tab1,tab2,tab3,tab4,tab5 = st.tabs([
     "🔬 Design Primers","🗺️ Vector Map","📊 Progress Tracker","🧫 Gel Upload","📥 Export"])
 
@@ -569,8 +569,13 @@ with tab1:
                         "added alongside them — the Progress Tracker and Export use only the "
                         "**latest version per amplicon number**, so review both sets afterwards.")
 
-        confirmed = _param_confirm_panel(max_amp, min_over, opt_tm, min_tm, max_tm)
+        confirmed, pvals = _param_confirm_panel()
         if confirmed:
+            max_amp  = pvals['max_amp']
+            min_over = pvals['min_over']
+            opt_tm   = pvals['opt_tm']
+            min_tm   = pvals['min_tm']
+            max_tm   = pvals['max_tm']
             params = {'PRIMER_OPT_SIZE':20,'PRIMER_MIN_SIZE':18,'PRIMER_MAX_SIZE':25,
                       'PRIMER_OPT_TM':opt_tm,'PRIMER_MIN_TM':min_tm,'PRIMER_MAX_TM':max_tm,
                       'PRIMER_MIN_GC':40.0,'PRIMER_MAX_GC':60.0,'PRIMER_MAX_POLY_X':4,
