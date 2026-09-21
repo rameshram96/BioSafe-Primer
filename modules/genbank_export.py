@@ -1,13 +1,3 @@
-"""
-genbank_export.py — BioSafe Primer
-Builds a GenBank (.gb) file annotated with amplicon and primer features,
-readable in SnapGene, ApE, Benchling, etc.
-
-Feature layout (amplicon/primer annotations ONLY — no source feature and
-no features carried over from the originally uploaded file):
-  misc_feature  — one per amplicon, colored by status
-  primer_bind   — one per FP (forward strand) and RP (reverse strand)
-"""
 import io
 import re
 from datetime import datetime

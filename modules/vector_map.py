@@ -1,10 +1,4 @@
-"""
-Interactive circular vector map — HTML/JS/SVG.
-Amplicons only (no separate feature ring), drawn as two alternating
-concentric bands so overlapping amplicons never visually collide.
-Labels sit outside the ring on leader lines (SnapGene-style).
-Base 1 is at 12 o'clock, increasing clockwise.
-"""
+
 import json
 import math
 

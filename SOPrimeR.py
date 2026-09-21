@@ -135,13 +135,27 @@ html,body,[class*="css"]{font-family:'IBM Plex Sans','Segoe UI',Arial,sans-serif
 .block-container{padding-bottom:44px !important;}
 </style>
 """, unsafe_allow_html=True)
+st.markdown("""
+<style>
+[data-testid="stSidebar"] { display: none; }
+[data-testid="collapsedControl"] { display: none; }
+</style>
+""", unsafe_allow_html=True)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def footer():
-    st.markdown('<div class="footer-ribbon"><strong>BioSafe Primer</strong>'
+    st.markdown('<div class="footer-ribbon"><strong>SOPrimeR</strong>'
                 ' &nbsp;·&nbsp; Developed and maintained by '
                 '<strong>Division of Plant Physiology, ICAR-Indian Agricultural Research Institute</strong>'
+                ' &nbsp;·&nbsp; ⚠️ Browser session only — no auto-save. Download <strong>.bsp</strong> often to avoid losing work.'
                 '</div>', unsafe_allow_html=True)
+    fc1, fc2, fc3 = st.columns(3)
+    with fc1:
+        st.page_link("pages/1_ℹ️_About_Us.py", label="About Us")
+    with fc2:
+        st.page_link("pages/2_🔒_Privacy_Policy.py", label="Privacy Policy")
+    with fc3:
+        st.page_link("pages/3_💾_Data_Storage_Disclosure.py", label="Data Storage Disclosure")
 
 def fmt_ov(val):   return f"{val} bp" if val is not None else "N/A"
 def ov_badge(val, mn=50):
@@ -403,11 +417,9 @@ def render_header():
     badge = (f'<div class="active-proj-badge">📂 {p["project_name"]} &nbsp;·&nbsp; {p["vector_length"]:,} bp</div>'
              if p else "")
     st.markdown(f"""<div class="main-header">
-  <div><h1>🧬 BioSafe Primer</h1>
-  <p>Overlapping PCR primer design · Progress monitoring · GMO exemption workflow</p></div>
+  <div><h1>🧬 SOPrimeR</h1>
+  <p>Overlapping PCR primer design · Progress monitoring · Exemption of the Genome Edited Plants</p></div>
   {badge}</div>""", unsafe_allow_html=True)
-    
-
 render_header()
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -415,7 +427,13 @@ render_header()
 # ══════════════════════════════════════════════════════════════════════════════
 if 'project' not in st.session_state:
     st.markdown('<div class="section-header">Project Hub</div>', unsafe_allow_html=True)
-
+    st.markdown("""
+    <div class="split-warning">
+    ⚠️ <strong>No server-side saving:</strong> BioSafe Primer keeps your project (primers, gel images,
+    run history) in temporary browser memory — nothing is saved automatically. If your session
+    disconnects, refreshes, or times out, unsaved changes are lost. Use <strong>💾 Save Project (.bsp)</strong>
+    frequently and re-upload it to resume work.
+        </div>""", unsafe_allow_html=True)
     # Create New Project
     st.markdown('<div class="home-box"><h3>🆕 Create New Project</h3>', unsafe_allow_html=True)
     new_name = st.text_input("Project name", placeholder="e.g. pCAMBIA1300_GFP", key="new_name")

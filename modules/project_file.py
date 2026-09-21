@@ -1,9 +1,4 @@
-"""
-project_file.py — BioSafe Primer (.bsp) file handler.
-Everything in memory. No disk writes ever.
-Gel images stored as base64 inside project dict.
-Excel/PDF generated into BytesIO buffers.
-"""
+
 import json, base64, copy, csv
 from datetime import datetime
 from io import BytesIO, StringIO
@@ -370,10 +365,6 @@ def primers_to_pdf_bytes(project_name, primers, pcr_runs, seq_info=None):
     story.append(PageBreak())
 
     # ── Primer summary table ──────────────────────────────────────────────────
-    # Columns kept: Amp#, Name, Ver, Status, FP sequence/Len/Tm/GC%,
-    # RP sequence/Len/Tm/GC%, Amp Len, Overlap Up/Down.
-    # Columns dropped (per request): FP/RP Hairpin, FP/RP 3'Stab,
-    # FP/RP Penalty, Pair Penalty.
     story.append(Paragraph("Primer Design Summary", sec_s))
     thead = [['Amp#','Name','Ver','Status',
               'Forward Primer','FP\nLen','FP\nTm','FP\nGC%',
