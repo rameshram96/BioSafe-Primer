@@ -34,6 +34,28 @@ def gc_percent(seq):
     return round((gc / len(seq)) * 100, 1) if seq else 0
 
 
+def split_origin_span(start, end, seq_len):
+    """
+    Translate an "extended" (monotonic, possibly > seq_len) coordinate span
+    into one or two real 0-based half-open spans on the circular vector.
+
+    Amplicons that wrap the plasmid origin are stored internally with
+    `amplicon_end > seq_len` (e.g. start=15741, end=16080 on a 15888 bp
+    vector) so that length math (`end - start == amplicon_length`) stays
+    simple and monotonic. Anything that needs to plot or annotate the real
+    sequence (GenBank export, position labels, etc.) must call this first.
+
+    Returns a list of (start, end) tuples:
+      - one tuple if the span does not cross the origin
+      - two tuples, in sequence order, if it does:
+            [(start, seq_len), (0, end - seq_len)]
+    """
+    start = max(0, start)
+    if end <= seq_len:
+        return [(start, end)]
+    return [(start, seq_len), (0, end - seq_len)]
+
+
 def _call_primer3(seg_seq, product_min, product_max, params,
                   fp_zone=None, rp_zone=None):
     product_min = max(product_min, 1)
@@ -192,7 +214,7 @@ def _failed_placeholder(amplicon_num, seg_start, seg_end):
 
 
 def _design_circular_overlap(sequence, last_amp, first_amp, min_overlap, params,
-                              max_amplicon=MAX_AMPLICON):
+                              max_amplicon=MAX_AMPLICON, fp_shift=0, ext_right=0):
     """
     Redesign the FP/RP of the LAST amplicon so it reads through the origin
     of the (circular) vector and overlaps Amplicon 1 by >= min_overlap bp.
@@ -204,22 +226,75 @@ def _design_circular_overlap(sequence, last_amp, first_amp, min_overlap, params,
     (same region it would normally use) and to keep RP inside the wrap pad,
     which guarantees the resulting amplicon reads across the origin.
 
+    fp_shift / ext_right widen the search space for manual redesign (see
+    `redesign_wrap_amplicon`, the public entry point for the "Redesign" UI).
+    Both default to 0, which reproduces the original automatic-design
+    behaviour exactly.
+
+      - fp_shift (signed, bp): moves the FP search start relative to the
+        amplicon's current position. This is deliberately NOT the usual
+        "upstream extension widens the window" pattern used for ordinary
+        amplicons — for the wrap amplicon the pre-origin segment
+        ("tail") directly eats into the 500 bp product-size ceiling, so
+        the failure mode that actually needs fixing most often is
+        "the tail alone is already too long to leave room for the
+        required overlap" (e.g. tail=442bp on a 500bp cap with a 150bp
+        overlap requirement — no primer choice, however good, can
+        satisfy that; the amplicon has to start later).
+          fp_shift > 0  → moves FP LATER (toward the vector's end),
+                          shrinking the tail and freeing up product-size
+                          budget for the overlap. This is the knob to use
+                          when redesign fails because the tail is too long.
+          fp_shift < 0  → moves FP EARLIER, growing the tail. Only useful
+                          if there's a bad/low-quality primer right at the
+                          current FP position and more room is wanted to
+                          search for a better one, and the tail has spare
+                          budget to give up.
+      - ext_right (bp, >=0): widens the wrap pad taken from the start of
+        the vector, giving Primer3 more room past Amplicon 1's end to
+        place the RP — useful when the wrap failed because there wasn't
+        enough sequence past the minimum overlap to find a clean RP.
+
+    IMPORTANT — coordinate convention:
+    The returned 'amplicon_start' / 'amplicon_end' are "extended" (monotonic)
+    coordinates: amplicon_start is always a normal 0-based vector position
+    (< seq_len), but amplicon_end may exceed seq_len when the amplicon reads
+    through the origin. This keeps `amplicon_length == amplicon_end - amplicon_start`
+    true everywhere, and keeps the position pair a single, always-increasing
+    span instead of a (start > end) pair that would be ambiguous.
+    Any code that needs the *real* sequence coordinates (GenBank export,
+    plotting) MUST convert first — see `split_origin_span()`.
+
     Returns a dict of updated fields to merge into `last_amp`, or None if
-    Primer3 could not find a qualifying pair.
+    Primer3 could not find a qualifying pair, or if the requested geometry
+    is mathematically impossible regardless of primer choice (in which
+    case the caller — `redesign_wrap_amplicon` — reports why).
     """
     seq_len    = len(sequence)
-    last_start = last_amp['amplicon_start']
+    last_start = max(0, min(seq_len - 1, last_amp['amplicon_start'] + fp_shift))
 
     # How far past the origin we need to search: enough to cover the
     # requested overlap plus a safety buffer, but at least far enough to
-    # reach past the end of Amplicon 1.
-    pad = min(seq_len, max(first_amp['amplicon_end'], 1) + min_overlap + 50)
+    # reach past the end of Amplicon 1. ext_right widens this further.
+    pad = min(seq_len, max(first_amp['amplicon_end'], 1) + min_overlap + 50 + ext_right)
     if pad < 1:
         return None
 
     wrap_seq = sequence[last_start:] + sequence[:pad]
     seg_len  = len(wrap_seq)
     tail_len = seq_len - last_start  # index in wrap_seq where the origin wrap begins
+
+    # Hard geometry check: if the pre-origin tail alone already leaves no
+    # room for a real primer pair plus the required overlap, no amount of
+    # Primer3 searching within this template can succeed — report that
+    # distinctly rather than let it fall through to a generic "not found".
+    # FP can land anywhere within the first FP_ZONE_WIDTH bases of the
+    # template, so the *true* minimum achievable tail is up to
+    # FP_ZONE_WIDTH bp shorter than the nominal tail_len — use that more
+    # permissive bound so borderline-but-feasible shifts aren't rejected.
+    min_possible_product = max(0, tail_len - FP_ZONE_WIDTH) + min_overlap
+    if min_possible_product > max_amplicon:
+        return None
 
     prod_min = MIN_AMPLICON
     prod_max = min(max_amplicon, seg_len)
@@ -300,7 +375,17 @@ def _design_circular_overlap(sequence, last_amp, first_amp, min_overlap, params,
             'fp_penalty':       round(result.get(f'PRIMER_LEFT_{i}_PENALTY', 0), 4),
             'rp_penalty':       round(result.get(f'PRIMER_RIGHT_{i}_PENALTY', 0), 4),
             'pair_penalty':     round(result.get(f'PRIMER_PAIR_{i}_PENALTY', 0), 4),
+            # FIX: amplicon_start/end must move together as one consistent,
+            # monotonic ("extended") span — previously amplicon_end was
+            # left untouched here, so it kept the value from BEFORE this
+            # wrap redesign (a different, non-wrapping primer pair). That
+            # produced a self-inconsistent record: amplicon_length in the
+            # note said e.g. 340 bp, but amplicon_start..amplicon_end
+            # spanned only ~130 bp of totally unrelated sequence, and the
+            # exported RP primer_bind location pointed at the OLD RP's
+            # position instead of the new origin-spanning one.
             'amplicon_start':   last_start + fp_pos[0],
+            'amplicon_end':     last_start + raw_end,
             'amplicon_length':  product,
             'wraps_origin':     True,
             'circular_overlap': overlap,
@@ -596,22 +681,13 @@ def redesign_primers(sequence, seg_start, seg_end, amplicon_num,
     """
     Redesign primers for a failed amplicon.
 
-    If the extended region exceeds MAX_AMPLICON (500 bp):
-      - Splits into two overlapping amplicons (A and B)
-      - Returns a list of two primers instead of one
-      - Both amplicons together cover the full region with no gap
-      - Returns (result, None, is_split=True)
-
-    Returns:
-      (primer_or_list, error_message, is_split)
-      - primer_or_list: single primer dict, or list of two dicts if split
-      - error_message: None on success, string on failure
-      - is_split: True if region was split into two amplicons
-
-    Note: if this is the LAST amplicon of a circular vector, redesigning it
-    here does not automatically re-verify the circular overlap with
-    Amplicon 1 — re-run the full design, or manually confirm the wrap-around
-    overlap (Rule 5) after accepting a manual redesign of the final amplicon.
+    NOTE ON CIRCULAR WRAP AMPLICONS: this function does not run the
+    origin-spanning wrap logic (`_design_circular_overlap`). If the primer
+    being redesigned here is the final, origin-spanning amplicon of a
+    circular vector, the result will be a normal (non-wrapping) redesign
+    and will NOT automatically re-establish Rule 5 (circular closure).
+    Re-run the full design, or manually re-verify/re-run the wrap step
+    after accepting a manual redesign of the final amplicon.
     """
     if old_version >= MAX_REDESIGN_VERSIONS:
         return None, (f"Maximum redesign attempts ({MAX_REDESIGN_VERSIONS}) "
@@ -625,13 +701,6 @@ def redesign_primers(sequence, seg_start, seg_end, amplicon_num,
     actual_end   = min(seq_len, seg_end + ext_right)
     region_len   = actual_end - actual_start
 
-    # ── Try single amplicon first (Primer3 enforces ≤500bp via product size range) ──
-    # Segment can be larger than 500bp — Primer3 still returns amplicons ≤500bp
-    # Only split if Primer3 genuinely cannot find any valid pair in this region
-    if False:  # placeholder — split logic moved below after single attempt
-        pass
-    # ── Single amplicon redesign ──────────────────────────────────────────────
-    # Segment may exceed 500bp — that is fine, Primer3 returns amplicons ≤500bp
     r, offset = _design_segment(sequence, actual_start, actual_end, params)
     primer    = _extract_best(r, offset, amplicon_num,
                                version=old_version + 1,
@@ -642,15 +711,12 @@ def redesign_primers(sequence, seg_start, seg_end, amplicon_num,
         return primer, None, False
 
     # ── Primer3 failed on full extended segment — try auto-split ─────────────
-    # Split the ORIGINAL failed region (seg_start → seg_end) at midpoint
-    # Both halves stay within 150–500bp
     mid     = seg_start + (seg_end - seg_start) // 2
     a_start = max(0, seg_start - ext_left)
     a_end   = min(seq_len, mid + 25)
     b_start = max(0, mid - 25)
     b_end   = min(seq_len, seg_end + ext_right)
 
-    # Enforce 500bp cap on each half's segment
     if a_end - a_start > MAX_AMPLICON:
         a_end = a_start + MAX_AMPLICON
     if b_end - b_start > MAX_AMPLICON:
@@ -682,3 +748,109 @@ def redesign_primers(sequence, seg_start, seg_end, amplicon_num,
         amp_a['redesign_ok'] = False
 
     return [amp_a, amp_b], None, True
+
+
+def redesign_wrap_amplicon(sequence, last_amp, first_amp, min_overlap,
+                            fp_shift=0, ext_right=0, old_version=1,
+                            params=None, max_amplicon=MAX_AMPLICON,
+                            prev_amp_end=None):
+    """
+    Redesign the origin-spanning ("wrap") amplicon — the one that closes
+    the circular vector by overlapping Amplicon 1 across the origin.
+
+    This is the wrap-aware counterpart to `redesign_primers()`. It must be
+    used instead of `redesign_primers()` whenever the amplicon being
+    redesigned is the circular-closure amplicon — `redesign_primers()` only
+    knows how to search a normal, non-wrapping window and will silently
+    produce a primer pair that no longer closes the circle (this was the
+    gap flagged after the earlier GenBank export fix: the design logic and
+    export logic were fixed to *represent* the wrap correctly, but manual
+    redesign of that specific amplicon still bypassed the wrap step
+    entirely).
+
+    See `_design_circular_overlap` for what `fp_shift` and `ext_right` do
+    and why the wrap amplicon needs a different pair of knobs than the
+    "extend left / extend right" pattern used for ordinary amplicons.
+
+    Returns (primer_dict, error_message):
+      - primer_dict: a full primer record (same shape as design_all_primers
+        output) with wraps_origin=True, correct extended amplicon_end,
+        version = old_version + 1, and redesign_violations/redesign_ok
+        filled in against `min_overlap` and `prev_amp_end`.
+      - error_message: None on success, a string explaining the failure
+        otherwise (primer_dict is None in that case).
+    """
+    if old_version >= MAX_REDESIGN_VERSIONS:
+        return None, (f"Maximum redesign attempts ({MAX_REDESIGN_VERSIONS}) "
+                      f"reached for Amplicon {last_amp['amplicon_num']}")
+
+    if params is None:
+        params = DEFAULT_PARAMS.copy()
+
+    seq_len   = len(sequence)
+    last_start = max(0, min(seq_len - 1, last_amp['amplicon_start'] + fp_shift))
+    tail_len   = seq_len - last_start
+    min_possible_product = max(0, tail_len - FP_ZONE_WIDTH) + min_overlap
+    if min_possible_product > max_amplicon:
+        shortfall = min_possible_product - max_amplicon
+        return None, (
+            f"Geometry impossible, not a primer-quality issue: with this FP "
+            f"shift, the pre-origin segment alone is {tail_len} bp, which "
+            f"already leaves less than {min_overlap} bp of room inside the "
+            f"{max_amplicon} bp amplicon-size ceiling (short by ~{shortfall} bp). "
+            "No primer choice can fix this. Either increase 'Shift FP later' "
+            "by at least that amount, raise the max amplicon size in the "
+            "sidebar, or lower the minimum overlap requirement."
+        )
+
+    wrap_fields = _design_circular_overlap(
+        sequence, last_amp, first_amp, min_overlap, params,
+        max_amplicon=max_amplicon, fp_shift=fp_shift, ext_right=ext_right
+    )
+    if wrap_fields is None:
+        return None, (
+            "Primer3 could not find a primer pair meeting Tm/GC/hairpin "
+            f"criteria that both fits the {MIN_AMPLICON}-{max_amplicon} bp "
+            f"amplicon size window and overlaps Amplicon 1 by >= {min_overlap} bp. "
+            "Try a different FP shift value, increase the downstream "
+            "extension, or lower the minimum overlap requirement."
+        )
+
+    primer = {
+        'amplicon_num':     last_amp['amplicon_num'],
+        'amplicon_name':    last_amp.get('amplicon_name'),
+        'version':          old_version + 1,
+        'status':           'Pending',
+        'violations':       [],
+        'fp_self_any':      0, 'fp_self_end': 0,
+        'rp_self_any':      0, 'rp_self_end': 0,
+    }
+    primer.update(wrap_fields)
+
+    # Upstream overlap: this amplicon's FP against the *previous* amplicon
+    # in the linear chain (not Amplicon 1 — that's the circular/downstream
+    # side, captured by 'circular_overlap' / 'overlap_next' already).
+    violations = []
+    if prev_amp_end is not None:
+        primer['overlap_prev'] = prev_amp_end - primer['amplicon_start']
+        if primer['overlap_prev'] < min_overlap:
+            violations.append(
+                f"Upstream overlap = {primer['overlap_prev']} bp "
+                f"(< {min_overlap} bp). A positive FP shift moves the "
+                "amplicon later and shrinks this overlap — try a smaller "
+                "shift, or accept a smaller circular overlap instead."
+            )
+    else:
+        primer['overlap_prev'] = None
+
+    if primer['circular_overlap'] < min_overlap:
+        # Shouldn't happen — _design_circular_overlap already enforces this
+        # — but keep the check for defense in depth.
+        violations.append(
+            f"Circular overlap with Amplicon 1 = {primer['circular_overlap']} bp "
+            f"(< {min_overlap} bp)."
+        )
+
+    primer['redesign_violations'] = violations
+    primer['redesign_ok']         = len(violations) == 0
+    return primer, None

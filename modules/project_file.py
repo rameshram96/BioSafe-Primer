@@ -1,13 +1,10 @@
-"""
-project_file.py — BioSafe Primer (.bsp) file handler.
-Everything in memory. No disk writes ever.
-Gel images stored as base64 inside project dict.
-Excel/PDF generated into BytesIO buffers.
-"""
+
 import json, base64, copy, csv
 from datetime import datetime
 from io import BytesIO, StringIO
 from collections import defaultdict
+
+from .vector_map import build_static_circular_map_png
 
 BSP_VERSION = "1.0"
 
@@ -25,6 +22,8 @@ def new_project(name, vector_name, vector_length, vector_sequence, vector_featur
         "primers":          [],
         "pcr_runs":         [],
         "redesign_history": [],
+        "design_params":    {},
+	"control_primers":  [],
     }
 
 
@@ -38,6 +37,8 @@ def load_project_bytes(file_bytes):
     state = json.loads(file_bytes.decode("utf-8"))
     if "project_name" not in state:
         raise ValueError("Not a valid BioSafe Primer (.bsp) file.")
+    state.setdefault("design_params", {})      # ← add
+    state.setdefault("control_primers", [])    # ← add
     return state
 
 
@@ -54,6 +55,18 @@ def get_best_primers(state):
     for p in state.get("primers", []):
         an = p["amplicon_num"]
         if an not in seen or p.get("version",1) > seen[an].get("version",1):
+            seen[an] = p
+    return sorted(seen.values(), key=lambda x: x["amplicon_num"])
+
+
+def _dedupe_best(primers):
+    """Same dedup logic as get_best_primers() but operating on a raw list
+    of primer dicts instead of a project state — used when we only have
+    an already-extracted list (e.g. inside the PDF export)."""
+    seen = {}
+    for p in primers:
+        an = p["amplicon_num"]
+        if an not in seen or p.get("version", 1) > seen[an].get("version", 1):
             seen[an] = p
     return sorted(seen.values(), key=lambda x: x["amplicon_num"])
 
@@ -82,7 +95,15 @@ def update_amplicon_name(state, primer_id, new_name):
 
 
 def add_pcr_run(state, primer_id, result, gel_b64, lane_number,
-                notes, amplicon_num, fp_sequence, rp_sequence):
+                notes, amplicon_num, fp_sequence, rp_sequence,
+                lane_labels=None, control_ids=None):
+    """
+    lane_labels: optional list of per-lane descriptive labels.
+    control_ids: optional list of control-primer ids (e.g. ['C1']) used on
+    this gel. Names are snapshotted so the run still shows them if the
+    control is later deleted or renamed.
+    """
+    control_ids = control_ids or []
     state["pcr_runs"].append({
         "id":            len(state["pcr_runs"]) + 1,
         "primer_id":     primer_id,
@@ -92,6 +113,10 @@ def add_pcr_run(state, primer_id, result, gel_b64, lane_number,
         "result":        result,
         "gel_image_b64": gel_b64,
         "lane_number":   lane_number,
+        "lane_labels":   lane_labels or [],
+        "control_ids":   control_ids,                                   # ← add
+        "control_names": [c["name"] for c in state.get("control_primers", [])
+                          if c["id"] in control_ids],                   # ← add
         "notes":         notes,
         "run_date":      datetime.now().strftime("%Y-%m-%d %H:%M"),
     })
@@ -123,7 +148,7 @@ def assign_ids(primers):
 def get_project_stats(state):
     best  = get_best_primers(state)
     total = len(best)
-    done  = sum(1 for p in best if p.get("status") == "Done")
+    done  = sum(1 for p in best if p.get("status") in ("Success", "Done"))
     return {"total": total, "done": done}
 
 
@@ -133,7 +158,7 @@ def primers_to_excel_bytes(primers, project_name):
     from openpyxl.utils import get_column_letter
 
     STATUS_COLORS = {
-        'Pending':'FFF9C4','Done':'C8E6C9','Failed':'FFCDD2',
+                'Pending':'FFF9C4','Done':'C8E6C9','Success':'C8E6C9','Failed':'FFCDD2',
         'Overlap Violation':'E1BEE7','Design Failed':'F8BBD9','Redesigned':'B3E5FC',
     }
     wb = openpyxl.Workbook()
@@ -292,7 +317,19 @@ def primers_to_order_csv_bytes(primers):
     return buf
 
 
-def primers_to_pdf_bytes(project_name, primers, pcr_runs):
+def primers_to_pdf_bytes(project_name, primers, pcr_runs, seq_info=None):
+    """
+    seq_info: optional dict with 'name', 'sequence', 'length' — when
+    provided, a static circular vector map (amplicons + primers,
+    matplotlib-rendered) is embedded near the top of the report.
+
+    NOTE ON TABLE COLUMNS: the primer summary table intentionally omits
+    Hairpin Tm, 3' End Stability, and Penalty for both FP and RP, and
+    omits Pair Penalty — these are secondary Primer3 diagnostics that
+    are still available in the full Excel export (primers_to_excel_bytes)
+    and in the on-screen amplicon details, just not in this printed
+    summary table.
+    """
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors
     from reportlab.lib.units import cm
@@ -317,15 +354,29 @@ def primers_to_pdf_bytes(project_name, primers, pcr_runs):
     story.append(Paragraph(
         "BioSafe Primer | Division of Plant Physiology, ICAR-IARI", body_s))
     story.append(Spacer(1,0.3*cm))
+
+    # ── Circular vector map (amplicons + primers) ────────────────────────────
+    if seq_info:
+        best_for_map = _dedupe_best(
+            [p for p in primers if p.get('fp_sequence') != 'DESIGN_FAILED']
+        )
+        if best_for_map:
+            story.append(Paragraph("Circular Vector Map — Amplicons & Primers", sec_s))
+            try:
+                map_buf = build_static_circular_map_png(seq_info, best_for_map)
+                story.append(RLImage(map_buf, width=16*cm, height=16*cm))
+            except Exception:
+                pass
+            story.append(Spacer(1, 0.3*cm))
+
     story.append(PageBreak())
 
+    # ── Primer summary table ──────────────────────────────────────────────────
     story.append(Paragraph("Primer Design Summary", sec_s))
     thead = [['Amp#','Name','Ver','Status',
               'Forward Primer','FP\nLen','FP\nTm','FP\nGC%',
-              'FP\nHairpin',"FP\n3'Stab",'FP\nPenalty',
               'Reverse Primer','RP\nLen','RP\nTm','RP\nGC%',
-              'RP\nHairpin',"RP\n3'Stab",'RP\nPenalty',
-              'Pair\nPenalty','Amp\nLen','Overlap\nUp','Overlap\nDown']]
+              'Amp\nLen','Overlap\nUp','Overlap\nDown']]
     for p in primers:
         prev_ov = p.get('overlap_prev')
         next_ov = p.get('overlap_next')
@@ -334,11 +385,7 @@ def primers_to_pdf_bytes(project_name, primers, pcr_runs):
             p.get('amplicon_name',f"Amplicon_{p['amplicon_num']}"),
             str(p.get('version',1)), p.get('status','Pending'),
             p['fp_sequence'],str(p['fp_length']),f"{p['fp_tm']}°C",f"{p['fp_gc']}%",
-            f"{p.get('fp_hairpin_tm',0)}°C",f"{p.get('fp_end_stability',0)}",
-            str(p.get('fp_penalty',0)),
             p['rp_sequence'],str(p['rp_length']),f"{p['rp_tm']}°C",f"{p['rp_gc']}%",
-            f"{p.get('rp_hairpin_tm',0)}°C",f"{p.get('rp_end_stability',0)}",
-            str(p.get('rp_penalty',0)),str(p.get('pair_penalty',0)),
             str(p['amplicon_length']),
             str(prev_ov) if prev_ov is not None else 'N/A',
             str(next_ov) if next_ov is not None else 'N/A',
@@ -348,24 +395,27 @@ def primers_to_pdf_bytes(project_name, primers, pcr_runs):
         ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#1A237E')),
         ('TEXTCOLOR',(0,0),(-1,0),colors.white),
         ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),
-        ('FONTSIZE',(0,0),(-1,-1),5.5),
+        ('FONTSIZE',(0,0),(-1,-1),7),
         ('ALIGN',(0,0),(-1,-1),'CENTER'),
         ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
         ('ROWBACKGROUNDS',(0,1),(-1,-1),
          [colors.HexColor('#F5F5FF'),colors.HexColor('#E8EAF6')]),
         ('GRID',(0,0),(-1,-1),0.4,colors.HexColor('#9FA8DA')),
         ('FONTNAME',(4,1),(4,-1),'Courier'),
-        ('FONTNAME',(11,1),(11,-1),'Courier'),
+        ('FONTNAME',(8,1),(8,-1),'Courier'),
     ]))
     story.append(t)
 
     if pcr_runs:
         story.append(PageBreak())
         story.append(Paragraph("PCR Run Log", sec_s))
-        rhead = [['Run Date','Amplicon #','Result','Lane','Notes']]
+        rhead = [['Run Date','Amplicon #','Result','Lane','Lanes in Gel','Notes']]
         for r in pcr_runs:
+            lane_labels = r.get('lane_labels') or []
+            lanes_str   = "; ".join(f"{i+1}:{lbl}" for i, lbl in enumerate(lane_labels)) if lane_labels else "—"
             rhead.append([r.get('run_date',''),str(r.get('amplicon_num','')),
-                          r.get('result',''),str(r.get('lane_number','')),r.get('notes','')])
+                          r.get('result',''),str(r.get('lane_number','')),
+                          lanes_str, r.get('notes','')])
         rt = Table(rhead, repeatRows=1)
         rt.setStyle(TableStyle([
             ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#283593')),
@@ -399,8 +449,11 @@ def primers_to_pdf_bytes(project_name, primers, pcr_runs):
                         img_el = RLImage(img_buf, width=7*cm, height=5*cm)
                     except Exception:
                         continue  # skip invalid/corrupt image
+                    lane_labels = r.get('lane_labels') or []
+                    lanes_note  = (" | Lanes: " + ", ".join(lane_labels)) if lane_labels else ""
                     cap       = Paragraph(
-                        f"<b>{rl}</b> Lane {r.get('lane_number','')} {r.get('run_date','')}",
+                        f"<b>{rl}</b> Lane {r.get('lane_number','')} {r.get('run_date','')}"
+                        f"<font size=6>{lanes_note}</font>",
                         ParagraphStyle('gc',parent=body_s,fontSize=7,
                                        textColor=rc,alignment=TA_CENTER))
                     gel_row.append([img_el, cap])
