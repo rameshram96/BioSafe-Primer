@@ -96,7 +96,6 @@ def update_amplicon_name(state, primer_id, new_name):
 
 def add_pcr_run(state, primer_id, result, gel_b64, lane_number,
                 notes, amplicon_num, fp_sequence, rp_sequence,
-<<<<<<< HEAD
                 lane_labels=None, control_ids=None):
     """
     lane_labels: optional list of per-lane descriptive labels.
@@ -105,16 +104,6 @@ def add_pcr_run(state, primer_id, result, gel_b64, lane_number,
     control is later deleted or renamed.
     """
     control_ids = control_ids or []
-=======
-                lane_labels=None):
-    """
-    lane_labels: optional list of strings — one label per lane visible in
-    this gel image (up to 15). Purely descriptive metadata about the gel
-    layout (e.g. sample names, ladder, controls); the run still carries a
-    single overall `result` (Pass/Fail) and a single `lane_number`
-    identifying which lane corresponds to `primer_id`.
-    """
->>>>>>> f37ec6fea9a29e73ff8768e3aee79348eceac541
     state["pcr_runs"].append({
         "id":            len(state["pcr_runs"]) + 1,
         "primer_id":     primer_id,
@@ -125,12 +114,9 @@ def add_pcr_run(state, primer_id, result, gel_b64, lane_number,
         "gel_image_b64": gel_b64,
         "lane_number":   lane_number,
         "lane_labels":   lane_labels or [],
-<<<<<<< HEAD
         "control_ids":   control_ids,                                   # ← add
         "control_names": [c["name"] for c in state.get("control_primers", [])
                           if c["id"] in control_ids],                   # ← add
-=======
->>>>>>> f37ec6fea9a29e73ff8768e3aee79348eceac541
         "notes":         notes,
         "run_date":      datetime.now().strftime("%Y-%m-%d %H:%M"),
     })
