@@ -541,8 +541,13 @@ with bb:
     st.download_button("💾 Save Project (.bsp)", data=save_project_bytes(proj()),
         file_name=f"{pname}.bsp", mime="application/json", key="save_banner")
 
+<<<<<<< HEAD
 tab1,tab2,tab3,tab4,tab5,tab6 = st.tabs([
     "🔬 Design Primers","🗺️ Vector Map","📊 Progress Tracker","🧫 Gel Upload","🧪 Control Primers","📥 Export"])
+=======
+tab1,tab2,tab3,tab4,tab5 = st.tabs([
+    "🔬 Design Primers","🗺️ Vector Map","📊 Progress Tracker","🧫 Gel Upload","📥 Export"])
+>>>>>>> f37ec6fea9a29e73ff8768e3aee79348eceac541
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — Design Primers
@@ -605,6 +610,7 @@ with tab1:
             with st.spinner("Designing primers with Primer3 (circular closure included)…"):
                 primers, violations = design_all_primers(proj()['vector_sequence'], max_amp, min_over, params)
 
+<<<<<<< HEAD
             # Record the parameters used so reports can state them
             proj()['design_params'] = {
                 'max_amplicon': max_amp, 'min_overlap': min_over,
@@ -616,6 +622,8 @@ with tab1:
                 'designed_at': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M'),
             }
 
+=======
+>>>>>>> f37ec6fea9a29e73ff8768e3aee79348eceac541
             if discard_old:
                 proj()['primers'] = []
                 assign_ids(primers)
@@ -865,8 +873,12 @@ with tab4:
             g_rs    = "Pass" if "Pass" in g_result else "Fail"
             add_pcr_run(proj(), g_p['_id'], g_rs, gel_b64, g_lane, g_note,
                         g_p['amplicon_num'], g_p['fp_sequence'], g_p['rp_sequence'],
+<<<<<<< HEAD
                         lane_labels=lane_labels,
                         control_ids=[ctrl_opts[n] for n in g_ctrl])
+=======
+                        lane_labels=lane_labels)
+>>>>>>> f37ec6fea9a29e73ff8768e3aee79348eceac541
             update_primer_status(proj(), g_p['_id'], "Success" if g_rs=="Pass" else "Failed")
             st.success("✅ Run saved! Remember to 💾 Save Project."); st.rerun()
 
@@ -1010,6 +1022,15 @@ with tab6:
             st.download_button("⬇️ Download Order CSV", data=buf,
                 file_name=f"{pname}_order_primers.csv", mime="text/csv",
                 key="dl_order_csv")
+<<<<<<< HEAD
+=======
+    with c4:
+        if st.button("📄 Generate PDF Report"):
+            buf = primers_to_pdf_bytes(pname, all_primers, pcr_runs, seq_info=si)
+            st.download_button("⬇️ Download PDF", data=buf,
+                file_name=f"{pname}_report.pdf", mime="application/pdf", key="dl_pdf")
+
+>>>>>>> f37ec6fea9a29e73ff8768e3aee79348eceac541
     with c5:
         if st.button("🧬 Generate GenBank (.gb)"):
             best = get_best_primers(proj())
