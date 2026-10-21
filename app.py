@@ -141,6 +141,22 @@ st.markdown("""
 <style>
 [data-testid="stSidebar"] { display: none; }
 [data-testid="collapsedControl"] { display: none; }
+
+/* Page links: centred, solid accent-blue button, white text */
+[data-testid="stPageLink"] { display: flex; justify-content: center; }
+[data-testid="stPageLink"] a,
+[data-testid="stPageLink-NavLink"] {
+    width: auto !important;
+    justify-content: center;
+    background: var(--accent);
+    border-radius: 8px;
+    padding: 6px 20px;
+    text-decoration: none;
+}
+[data-testid="stPageLink"] a:hover,
+[data-testid="stPageLink-NavLink"]:hover { background: var(--accent-dark); }
+[data-testid="stPageLink"] a *,
+[data-testid="stPageLink-NavLink"] * { color: #ffffff !important; font-weight: 600; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -151,14 +167,11 @@ def footer():
                 '<strong>Division of Plant Physiology, ICAR-Indian Agricultural Research Institute</strong>'
                 ' &nbsp;·&nbsp; ⚠️ Browser session only — no auto-save. Download <strong>.bsp</strong> often to avoid losing work.'
                 '</div>', unsafe_allow_html=True)
-    fc1, fc2, fc3 = st.columns(3)
-    with fc1:
-        st.page_link("pages/1_ℹ️_About_Us.py", label="About Us")
-    with fc2:
-        st.page_link("pages/2_🔒_Privacy_Policy.py", label="Privacy Policy")
-    with fc3:
-        st.page_link("pages/3_💾_Data_Storage_Disclosure.py", label="Data Storage Disclosure")
 
+    _, mid, _ = st.columns([1, 2, 1])
+    with mid:
+        st.page_link("pages/1_About_and_Policies.py",
+                     label="ℹ️ About · Privacy Policy · Data Storage Disclosure")
 def fmt_ov(val):   return f"{val} bp" if val is not None else "N/A"
 def ov_badge(val, mn=50):
     if val is None: return '<span class="ov-badge ov-na">N/A</span>'
