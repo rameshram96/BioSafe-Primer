@@ -28,7 +28,7 @@ from modules.project_file    import (new_project, save_project_bytes,
                                       update_amplicon_name, add_pcr_run,
                                       add_redesign_history, assign_ids,
                                       get_project_stats)
-st.set_page_config(page_title="BioSafe Primer", page_icon="🧬",
+st.set_page_config(page_title="GE-EDIT", page_icon="🧬",
                    layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
@@ -146,7 +146,7 @@ st.markdown("""
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def footer():
-    st.markdown('<div class="footer-ribbon"><strong>SOPrimeR</strong>'
+    st.markdown('<div class="footer-ribbon"><strong>GE-EDIT</strong>'
                 ' &nbsp;·&nbsp; Developed and maintained by '
                 '<strong>Division of Plant Physiology, ICAR-Indian Agricultural Research Institute</strong>'
                 ' &nbsp;·&nbsp; ⚠️ Browser session only — no auto-save. Download <strong>.bsp</strong> often to avoid losing work.'
@@ -419,7 +419,7 @@ def render_header():
     badge = (f'<div class="active-proj-badge">📂 {p["project_name"]} &nbsp;·&nbsp; {p["vector_length"]:,} bp</div>'
              if p else "")
     st.markdown(f"""<div class="main-header">
-  <div><h1>🧬 SOPrimeR</h1>
+  <div><h1>🧬 GE-EDIT</h1>
   <p>Overlapping PCR primer design · Progress monitoring · Exemption of the Genome Edited Plants</p></div>
   {badge}</div>""", unsafe_allow_html=True)
 render_header()
@@ -431,7 +431,7 @@ if 'project' not in st.session_state:
     st.markdown('<div class="section-header">Project Hub</div>', unsafe_allow_html=True)
     st.markdown("""
     <div class="split-warning">
-    ⚠️ <strong>No server-side saving:</strong> BioSafe Primer keeps your project (primers, gel images,
+    ⚠️ <strong>No server-side saving:</strong> GE-EDIT keeps your project (primers, gel images,
     run history) in temporary browser memory — nothing is saved automatically. If your session
     disconnects, refreshes, or times out, unsaved changes are lost. Use <strong>💾 Save Project (.bsp)</strong>
     frequently and re-upload it to resume work.
@@ -442,14 +442,14 @@ if 'project' not in st.session_state:
 
     input_mode = st.radio(
         "Sequence input method",
-        ["📁 Upload file", "📋 Paste sequence"],
+        ["📁Upload file", "📋 Paste sequence"],
         horizontal=True, key="input_mode"
     )
 
     si = None
     parse_error = None
 
-    if input_mode == "📁 Upload file":
+    if input_mode == "📁Upload file":
         new_file = st.file_uploader("Upload vector sequence (FASTA or GenBank)",
                                      type=['fa','fasta','fna','gb','gbk','genbank'], key="new_file")
         if new_file and new_name:
@@ -460,7 +460,7 @@ if 'project' not in st.session_state:
             except Exception as e:
                 parse_error = str(e)
         elif new_file and not new_name:
-            st.warning("⚠️ Please enter a project name before creating.")
+            st.warning("⚠️Please enter a project name before creating.")
     else:
         pasted = st.text_area(
             "Paste FASTA, GenBank, or raw sequence text",
@@ -476,22 +476,22 @@ if 'project' not in st.session_state:
             except Exception as e:
                 parse_error = str(e)
         elif pasted.strip() and not new_name:
-            st.warning("⚠️ Please enter a project name before creating.")
+            st.warning("⚠️Please enter a project name before creating.")
 
     if parse_error:
         st.error(f"Parse error: {parse_error}")
 
     if si:
         st.markdown(
-            '<div class="circ-note">🔁 This vector will be treated as a <strong>circular '
+            '<div class="circ-note">🔁This vector will be treated as a <strong>circular '
             'plasmid</strong> — the design step will make the last amplicon overlap '
             'Amplicon 1 across the origin.</div>', unsafe_allow_html=True)
         mc1,mc2,mc3 = st.columns(3)
         mc1.markdown(f'<div class="metric-card"><div class="value">{si["length"]:,}</div><div class="label">Vector Length (bp)</div></div>', unsafe_allow_html=True)
         mc2.markdown(f'<div class="metric-card"><div class="value">{len(si["features"])}</div><div class="label">Features</div></div>', unsafe_allow_html=True)
         mc3.markdown(f'<div class="metric-card"><div class="value">{"Pasted" if input_mode=="📋 Paste sequence" else "File"}</div><div class="label">Source</div></div>', unsafe_allow_html=True)
-        st.success(f"✅ Parsed: **{si['name']}** — {si['length']:,} bp")
-        if st.button("🚀 Create Project", type="primary"):
+        st.success(f"✅Parsed: **{si['name']}** — {si['length']:,} bp")
+        if st.button("🚀Create Project", type="primary"):
             p = new_project(new_name, si['name'], si['length'], si['sequence'], si.get('features',[]))
             st.session_state['project']  = p
             st.session_state['seq_info'] = si
@@ -500,7 +500,7 @@ if 'project' not in st.session_state:
 
     # Open Existing Project
     st.markdown("---")
-    st.markdown('<div class="home-box"><h3>📂 Open Saved Project</h3>', unsafe_allow_html=True)
+    st.markdown('<div class="home-box"><h3>📂Open Saved Project</h3>', unsafe_allow_html=True)
     bsp_file = st.file_uploader("Upload a .bsp project file", type=['bsp','json'], key="open_bsp")
     if bsp_file:
         try:
@@ -510,7 +510,7 @@ if 'project' not in st.session_state:
             stats = get_project_stats(p)
             st.success(f"✅ **{p['project_name']}** — {p['vector_length']:,} bp — "
                        f"{stats['done']}/{stats['total']} amplicons done")
-            if st.button("📂 Open Project", type="primary"):
+            if st.button("📂Open Project", type="primary"):
                 st.session_state['project']  = p
                 st.session_state['seq_info'] = si
                 st.rerun()
@@ -526,7 +526,7 @@ si    = st.session_state.get('seq_info', {})
 pname = proj()['project_name']
 
 st.markdown(f"""<div class="proj-banner">
-  <div><span class="pname">📂 {pname}</span>
+  <div><span class="pname">📂{pname}</span>
   <span class="pmeta">&nbsp;·&nbsp; {proj().get('vector_name','—')}
   &nbsp;·&nbsp; {proj().get('vector_length',0):,} bp
   &nbsp;·&nbsp; Created {proj().get('created_at','—')[:16]}</span></div>
@@ -538,7 +538,7 @@ with ba:
         del st.session_state['project']; st.session_state.pop('seq_info',None)
         st.session_state.pop('confirm_pending',None); st.rerun()
 with bb:
-    st.download_button("💾 Save Project (.bsp)", data=save_project_bytes(proj()),
+    st.download_button("💾Save Project (.bsp)", data=save_project_bytes(proj()),
         file_name=f"{pname}.bsp", mime="application/json", key="save_banner")
 
 tab1,tab2,tab3,tab4,tab5,tab6 = st.tabs([
@@ -572,7 +572,7 @@ with tab1:
         if existing:
             st.markdown("""
 <div class="param-confirm">
-  <h4>⚠️ This project already has designed primers</h4>
+  <h4>⚠️This project already has designed primers</h4>
 </div>""", unsafe_allow_html=True)
             keep_choice = st.radio(
                 "What should happen to the existing primer set?",
