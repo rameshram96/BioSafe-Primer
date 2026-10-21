@@ -12,6 +12,8 @@ BioSafe Primer does not collect, store, or transmit any personal data.
 - All uploaded sequences, primers, gel images, and project data are processed only in
   your active browser session and are never transmitted to or stored on our servers.
 
+GE-EDIT is an independent tool developed entirely by the research team of the Division of Plant Physiology, ICAR-Indian Agricultural Research Institute. It is not part of, affiliated with, endorsed by, or linked to the Department of Biotechnology (DBT), Ministry of Science and Technology, Government of India. The tool is designed on the basis of the guidelines issued by the DBT. Users are requested to verify the current official guidelines and cross-check the tool’s outputs against them before use or submission.
+
 **Note on hosting:** Depending on where this application is deployed or accessed from,
 the underlying hosting platform (e.g. a web server) may generate standard technical
 access logs (such as IP address and timestamp) outside of this application's control,
