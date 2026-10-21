@@ -171,7 +171,7 @@ def footer():
     _, mid, _ = st.columns([1, 2, 1])
     with mid:
         st.page_link("pages/1_About_and_Policies.py",
-                     label="ℹ️ About · Privacy Policy · Data Storage Disclosure")
+                     label="About · Privacy Policy · Data Storage Disclosure")
 def fmt_ov(val):   return f"{val} bp" if val is not None else "N/A"
 def ov_badge(val, mn=50):
     if val is None: return '<span class="ov-badge ov-na">N/A</span>'
