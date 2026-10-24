@@ -165,7 +165,7 @@ def footer():
     st.markdown('<div class="footer-ribbon"><strong>GE-EDIT</strong>'
                 ' &nbsp;·&nbsp; Developed and maintained by '
                 '<strong>Division of Plant Physiology, ICAR-Indian Agricultural Research Institute</strong>'
-                ' &nbsp;·&nbsp; ⚠️ Browser session only — no auto-save. Download <strong>.bsp</strong> often to avoid losing work.'
+                ' &nbsp;·&nbsp; ⚠️ Browser session only — no auto-save. Download <strong>.gedit</strong> often to avoid losing work.'
                 '</div>', unsafe_allow_html=True)
 
     _, mid, _ = st.columns([1, 2, 1])
@@ -446,7 +446,7 @@ if 'project' not in st.session_state:
     <div class="split-warning">
     ⚠️ <strong>No server-side saving:</strong> GE-EDIT keeps your project (primers, gel images,
     run history) in temporary browser memory — nothing is saved automatically. If your session
-    disconnects, refreshes, or times out, unsaved changes are lost. Use <strong>💾 Save Project (.bsp)</strong>
+    disconnects, refreshes, or times out, unsaved changes are lost. Use <strong>💾 Save Project (.gedit)</strong>
     frequently and re-upload it to resume work.
         </div>""", unsafe_allow_html=True)
     # Create New Project
@@ -514,7 +514,7 @@ if 'project' not in st.session_state:
     # Open Existing Project
     st.markdown("---")
     st.markdown('<div class="home-box"><h3>📂Open Saved Project</h3>', unsafe_allow_html=True)
-    bsp_file = st.file_uploader("Upload a .bsp project file", type=['bsp','json'], key="open_bsp")
+    bsp_file = st.file_uploader("Upload a GE-EDIT project file (.gedit)", type=['gedit','json'], key="open_bsp")
     if bsp_file:
         try:
             p  = load_project_bytes(bsp_file.read())
@@ -551,8 +551,8 @@ with ba:
         del st.session_state['project']; st.session_state.pop('seq_info',None)
         st.session_state.pop('confirm_pending',None); st.rerun()
 with bb:
-    st.download_button("💾Save Project (.bsp)", data=save_project_bytes(proj()),
-        file_name=f"{pname}.bsp", mime="application/json", key="save_banner")
+    st.download_button("💾Save Project (.gedit)", data=save_project_bytes(proj()),
+        file_name=f"{pname}.gedit", mime="application/json", key="save_banner")
 
 tab1,tab2,tab3,tab4,tab5,tab6 = st.tabs([
     "🔬 Design Primers","🗺️ Vector Map","📊 Progress Tracker","🧫 Gel Upload","🧪 Control Primers","📥 Export"])
@@ -850,7 +850,6 @@ with tab4:
             g_sel    = st.selectbox("Primer pair", list(popts.keys()))
             g_p      = popts[g_sel]
             g_result = st.radio("Result", ["Pass ✅","Fail ❌"], horizontal=True)
-            g_lane   = st.number_input("Lane number", 1, 50, 1)
             g_ctrl   = st.multiselect(
                 "Control pair(s) used on this gel", list(ctrl_opts.keys()),
                 help="Define control primers in the 🧪 Control Primers tab.")
@@ -876,7 +875,7 @@ with tab4:
         if st.button("💾 Save Run", type="primary"):
             gel_b64 = encode_gel_image(g_gel.read()) if g_gel else None
             g_rs    = "Pass" if "Pass" in g_result else "Fail"
-            add_pcr_run(proj(), g_p['_id'], g_rs, gel_b64, g_lane, g_note,
+            add_pcr_run(proj(), g_p['_id'], g_rs, gel_b64, g_note,
                         g_p['amplicon_num'], g_p['fp_sequence'], g_p['rp_sequence'],
                         lane_labels=lane_labels,
                         control_ids=[ctrl_opts[n] for n in g_ctrl])
@@ -995,7 +994,7 @@ with tab6:
     pcr_runs    = proj().get('pcr_runs',[])
 
     st.markdown("#### 💾 Save Project File")
-    st.download_button("⬇️ Download .bsp project file", data=save_project_bytes(proj()),
+    st.download_button("⬇️ Download .gedit project file", data=save_project_bytes(proj()),
         file_name=f"{pname}.bsp", mime="application/json",
         help="Complete project — open next session to resume.")
     st.caption("Contains everything: primers, gel images (embedded), PCR runs, control primers, redesign history.")

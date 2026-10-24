@@ -62,7 +62,7 @@ def _comment_for(doc, f, j, sequence, author, initials, runs):
     return ok
 
 
-def add_sequence_appendix(doc, rd, with_comments=True, author='SOPrimeR'):
+def add_sequence_appendix(doc, rd, with_comments=True, author='GE-EDIT'):
     """
     Append 'Appendix A' to `doc`. Returns a small status dict:
     {'comments': n_added, 'comments_skipped_reason': str|None, 'mismatches': [names]}.

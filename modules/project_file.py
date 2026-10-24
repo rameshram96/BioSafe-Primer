@@ -6,12 +6,12 @@ from collections import defaultdict
 
 from .vector_map import build_static_circular_map_png
 
-BSP_VERSION = "1.0"
+GEDIT_FORMAT_VERSION = "1.0"
 
 
 def new_project(name, vector_name, vector_length, vector_sequence, vector_features):
     return {
-        "bsp_version":      BSP_VERSION,
+        "format_version":      GEDIT_FORMAT_VERSION,
         "project_name":     name,
         "vector_name":      vector_name,
         "vector_length":    vector_length,
@@ -36,7 +36,7 @@ def save_project_bytes(state):
 def load_project_bytes(file_bytes):
     state = json.loads(file_bytes.decode("utf-8"))
     if "project_name" not in state:
-        raise ValueError("Not a valid BioSafe Primer (.bsp) file.")
+        raise ValueError("Not a valid GE-EDIT (.gedit) file.")
     state.setdefault("design_params", {})      # ← add
     state.setdefault("control_primers", [])    # ← add
     return state
@@ -94,7 +94,7 @@ def update_amplicon_name(state, primer_id, new_name):
                 p["amplicon_name"] = new_name
 
 
-def add_pcr_run(state, primer_id, result, gel_b64, lane_number,
+def add_pcr_run(state, primer_id, result, gel_b64,
                 notes, amplicon_num, fp_sequence, rp_sequence,
                 lane_labels=None, control_ids=None):
     """
@@ -112,7 +112,6 @@ def add_pcr_run(state, primer_id, result, gel_b64, lane_number,
         "rp_sequence":   rp_sequence,
         "result":        result,
         "gel_image_b64": gel_b64,
-        "lane_number":   lane_number,
         "lane_labels":   lane_labels or [],
         "control_ids":   control_ids,                                   # ← add
         "control_names": [c["name"] for c in state.get("control_primers", [])

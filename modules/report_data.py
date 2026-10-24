@@ -124,7 +124,7 @@ def build_report_data(project, seq_info=None, options=None):
             'created_at': project.get('created_at'),
             'report_date': opts['report_date'] or datetime.now().strftime('%Y-%m-%d'),
             'author': opts['author'], 'lab': opts['lab'],
-            'bsp_version': project.get('bsp_version'),
+            'format_version': project.get('format_version'),
             'fingerprints': sequence_fingerprints(sequence),
         },
         'design_params': params,

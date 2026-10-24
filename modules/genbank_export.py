@@ -67,7 +67,7 @@ def build_annotated_genbank(seq_info, primers, project_name, circular=True):
 
     seq_info: dict with 'name', 'sequence', 'features' (as produced by
               sequence_parser.parse_sequence or reconstructed from a
-              loaded .bsp project)
+              loaded .gedit project)
     primers:  list of primer dicts — pass the DEDUPED/"best" list
               (e.g. project_file.get_best_primers(proj)), not the full
               version history.
@@ -80,7 +80,7 @@ def build_annotated_genbank(seq_info, primers, project_name, circular=True):
     record.name = record.id
     record.description = (
         f"{project_name} — annotated with PCR primers and amplicons "
-        f"(BioSafe Primer, ICAR-IARI)"
+        f"(GE-EDIT, ICAR-IARI)"
     )
     record.annotations['molecule_type'] = 'DNA'
     record.annotations['topology']      = 'circular' if circular else 'linear'

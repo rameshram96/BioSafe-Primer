@@ -203,7 +203,7 @@ def _title_block(doc, rd):
     r.bold = True
     r.font.size = Pt(18)
     r.font.color.rgb = RGBColor.from_string(NAVY)
-    _note(doc, "SOPrimeR · Division of Plant Physiology, ICAR-Indian Agricultural "
+    _note(doc, "GE-EDIT · Division of Plant Physiology, ICAR-Indian Agricultural "
                "Research Institute — full vector coverage verification for "
                "genome-edited plant exemption.", italic=False)
 
@@ -435,7 +435,7 @@ def build_word_report(rd, return_status=False):
     sec.page_width, sec.page_height = Cm(29.7), Cm(21.0)
     sec.left_margin = sec.right_margin = Cm(1.5)
     sec.top_margin = sec.bottom_margin = Cm(1.5)
-    _footer(sec, f"{rd['meta']['project_name']} — SOPrimeR report")
+    _footer(sec, f"{rd['meta']['project_name']} — GE-EDIT")
 
     opts = rd['options']
     _title_block(doc, rd)
@@ -462,7 +462,7 @@ def build_word_report(rd, return_status=False):
         from .word_sequence import add_sequence_appendix
         status = add_sequence_appendix(
             doc, rd, with_comments=opts.get('include_comments', True),
-            author=(opts.get('author') or 'SOPrimeR'))
+            author=(opts.get('author') or 'GE-EDIT'))
 
     buf = BytesIO()
     doc.save(buf)

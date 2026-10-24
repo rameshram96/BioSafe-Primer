@@ -221,19 +221,19 @@ st.header("Data Storage Disclosure", anchor="data-storage-disclosure", divider="
 st.markdown("""
 <div class="callout">⚠️ <strong>No auto-save.</strong> GE-EDIT does not save your project to any
 database or user account. If the page refreshes, disconnects or times out, unsaved work is lost.
-Download your <strong>.bsp</strong> project file often.</div>
+Download your <strong>.gedit</strong> project file often.</div>
 """, unsafe_allow_html=True)
 
 st.markdown("""
 | Data | Where it lives | How long |
 |---|---|---|
 | Vector sequence, primers, PCR runs, control primers, redesign history, gel images | Temporary **session memory** while your session is open | Until you close or refresh the page, or the session times out |
-| Project file (`.bsp`) | **Your own computer**, only when you click download | Until you delete it. You control it |
+| Project file (`.gedit`) | **Your own computer**, only when you click download | Until you delete it. You control it |
 | Excel / CSV / GenBank / Word / PDF exports | Generated on request and sent to your browser for download | Not retained by the app after download |
 
-- The `.bsp` file is a plain JSON file containing *everything*: the full vector sequence, primers,
+- The `.gedit` file is a plain JSON file containing *everything*: the full vector sequence, primers,
   run log, control primers, and gel images (embedded). Treat it as confidential if your data are.
-- To resume work, upload your `.bsp` file on the Project Hub.
+- To resume work, upload your `.gedit` file on the Project Hub.
 - While your session is active, the data is held in the memory of the server process running
   the app, and it is discarded when the session ends. The app does not write it to a database
   or permanent storage.
